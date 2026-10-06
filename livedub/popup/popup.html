@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>LiveDub</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="cabecera">
+      <h1>LiveDub</h1>
+      <span class="fase">Fase 1 · Captura</span>
+    </header>
+
+    <section class="bloque">
+      <div id="estado" class="estado estado--inactivo">Inactivo</div>
+
+      <div class="medidor" title="Nivel de audio captado">
+        <div id="barraNivel" class="medidor__barra"></div>
+      </div>
+
+      <button id="botonPrincipal" class="boton boton--iniciar">Iniciar</button>
+    </section>
+
+    <section class="bloque">
+      <label class="campo">
+        <span>Idioma origen</span>
+        <select id="idiomaOrigen">
+          <option value="auto">Detectar automáticamente</option>
+          <option value="es">Español</option>
+          <option value="en">Inglés</option>
+          <option value="fr">Francés</option>
+          <option value="de">Alemán</option>
+          <option value="it">Italiano</option>
+          <option value="pt">Portugués</option>
+          <option value="ja">Japonés</option>
+        </select>
+      </label>
+
+      <label class="campo">
+        <span>Idioma destino</span>
+        <select id="idiomaDestino">
+          <option value="es">Español</option>
+          <option value="en">Inglés</option>
+          <option value="fr">Francés</option>
+          <option value="de">Alemán</option>
+          <option value="it">Italiano</option>
+          <option value="pt">Portugués</option>
+          <option value="ja">Japonés</option>
+        </select>
+      </label>
+
+      <p class="nota">Los idiomas todavía no hacen nada: se usarán en fases posteriores.</p>
+    </section>
+
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

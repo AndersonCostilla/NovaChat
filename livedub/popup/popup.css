@@ -1,0 +1,149 @@
+/* popup.css — estilos simples y funcionales del popup de LiveDub */
+
+:root {
+  --fondo: #14161a;
+  --panel: #1d2026;
+  --texto: #e9edf2;
+  --suave: #9aa3af;
+  --acento: #3ba55d;
+  --peligro: #d94f4f;
+  --borde: #2b2f37;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  width: 290px;
+  margin: 0;
+  padding: 12px;
+  background: var(--fondo);
+  color: var(--texto);
+  font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+}
+
+.cabecera {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.cabecera h1 {
+  margin: 0;
+  font-size: 17px;
+  letter-spacing: 0.5px;
+}
+
+.fase {
+  color: var(--suave);
+  font-size: 11px;
+}
+
+.bloque {
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 10px;
+  margin-bottom: 10px;
+}
+
+.estado {
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  margin-bottom: 8px;
+  word-break: break-word;
+}
+
+.estado--inactivo {
+  background: #2a2e36;
+  color: var(--suave);
+}
+
+.estado--iniciando {
+  background: #3a3418;
+  color: #e8d26a;
+}
+
+.estado--capturando {
+  background: #16331f;
+  color: #7fe09b;
+}
+
+.estado--error {
+  background: #3a1b1b;
+  color: #ff9b9b;
+}
+
+.medidor {
+  height: 10px;
+  background: #0e1013;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+
+.medidor__barra {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #3ba55d, #d3d84a, #d94f4f);
+  transition: width 90ms linear;
+}
+
+.boton {
+  width: 100%;
+  padding: 9px;
+  border: 0;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #fff;
+  cursor: pointer;
+}
+
+.boton--iniciar {
+  background: var(--acento);
+}
+
+.boton--detener {
+  background: var(--peligro);
+}
+
+.boton:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.campo {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.campo span {
+  color: var(--suave);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+
+select {
+  background: #0e1013;
+  color: var(--texto);
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  padding: 6px;
+  font-size: 13px;
+}
+
+.nota {
+  margin: 4px 0 0;
+  color: var(--suave);
+  font-size: 11px;
+  line-height: 1.35;
+}

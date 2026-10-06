@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <title>LiveDub — documento offscreen</title>
+  </head>
+  <body>
+    <!--
+      Este documento no se ve nunca. Existe porque el service worker de MV3
+      no puede usar getUserMedia() ni la Web Audio API.
+    -->
+    <p>LiveDub: documento offscreen de captura de audio.</p>
+    <script type="module" src="offscreen.js"></script>
+  </body>
+</html>
