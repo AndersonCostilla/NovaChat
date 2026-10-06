@@ -1,17 +1,39 @@
-# LiveDub — Fase 1 (esqueleto + captura de audio de la pestaña)
+# LiveDub — Fases 1-2 (captura de audio + segmentación VAD)
 
 Extensión de Chrome (Manifest V3) en JavaScript vanilla con módulos ES.
 **Sin frameworks, sin paso de build, sin CDN, sin servicios de pago.**
 
-En esta fase LiveDub **sólo** hace esto:
+Hasta ahora LiveDub **sólo** hace esto:
 
 1. Captura el audio de la pestaña activa (`chrome.tabCapture.getMediaStreamId`).
 2. Lo re-enruta a los altavoces para que lo sigas oyendo con normalidad
    (`MediaStreamSource → gainOriginal → destination`).
 3. Mide el nivel RMS del audio y lo pinta en una barra dentro del popup.
 4. Permite ajustar el volumen del audio original con el mensaje `SET_GAIN` (futuro *ducking*).
+5. **(Fase 2)** En paralelo, pasa el mismo stream por un segundo `AudioContext` a
+   16 kHz mono y lo trocea en "frases" con un VAD por detección de silencios.
+   Cada frase detectada se registra por consola del offscreen; nada más.
 
 **No hay transcripción, ni traducción, ni TTS.** Eso llega en fases posteriores.
+
+## Arquitectura de audio
+
+```
+contextOriginal (48 kHz)            -> lo que SE OYE
+  MediaStreamSource -> gainOriginal -> destination
+                    \-> analyser     (medidor, nodo hoja)
+
+contextProcessing (16 kHz, mono)    -> lo que VERÁ la IA (no se oye)
+  MediaStreamSource -> AudioWorkletNode('vad-processor') -> gain 0 -> destination
+```
+
+El worklet acumula bloques de 4096 muestras (256 ms a 16 kHz), calcula su RMS y
+los manda a `offscreen.js`, que aplica la máquina de estados del VAD:
+`VAD_THRESHOLD = 0.005` y `MAX_SILENCE_CHUNKS = 3` (≈750 ms de silencio cierran la frase).
+
+Para ver las frases: abre la consola del documento offscreen y busca
+`🗣️ Frase detectada: 2.048 segundos Float32Array(32768)`.
+Estado del VAD en caliente: `livedub.estado()`.
 
 ---
 
@@ -23,13 +45,15 @@ livedub/
   messages.js          Constantes de mensajería (tipos, destinatarios, estados)
   background.js        Service worker: streamId + ciclo de vida del offscreen
   offscreen.html
-  offscreen.js         getUserMedia + grafo de audio + medidor
+  offscreen.js         getUserMedia + grafo de audio + medidor + máquina VAD
+  vad-processor.js     AudioWorkletProcessor: bloques de 4096 muestras + RMS
   popup/
     popup.html
     popup.css
     popup.js
   icons/
     icon16.png  icon48.png  icon128.png
+  docs/TODO.md         Deuda técnica registrada
   README.md
 ```
 
