@@ -27,10 +27,16 @@ Registro de cosas detectadas y conscientemente aplazadas.
 
 ## Fase 3 — pendientes y avisos
 
-- **Estado de la fase:** código completo y verificado en **Nivel 1** (sintaxis,
-  manifest, ausencia de URLs remotas, degradación sin modelo). **Nivel 2
-  (prueba real en Chrome con los pesos colocados) PENDIENTE** de verificación
-  humana. No se avanza a Fase 4 hasta esa confirmación.
+- **Estado de la fase:** código completo. Nivel 1 verificado **con matices**:
+  ver `docs/VERIFICACION.md`, que distingue lo EJECUTADO (node --check, bash -n,
+  manifest, grep, SHA-256 del bundle, prueba de .gitignore) de lo que sólo está
+  respaldado por REVISIÓN DE CÓDIGO (la degradación sin modelo: nunca se cargó la
+  extensión en un Chrome real). **Nivel 2 PENDIENTE** de verificación humana.
+  No se avanza a Fase 4 hasta esa confirmación.
+- **El bundle vendorizado NO está parcheado**: las cadenas `huggingface.co` ×3 y
+  `cdn.jsdelivr.net` ×1 siguen dentro de `transformers.min.js` (son los valores
+  por defecto de su `env`); se anulan por configuración en tiempo de ejecución.
+  SHA-256 idéntico al de npm, documentado en `libs/transformers/README.md`.
 - **Pesos fuera de Git (decisión explícita):** `livedub/models/whisper-tiny/` está
   en `.gitignore` salvo `.gitkeep`. Motivo: decenas de MB que hincharían el
   historial para siempre. Se obtienen con `models/descargar-modelo.sh`.
