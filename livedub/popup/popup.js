@@ -2,7 +2,7 @@
 // Responsabilidad: interfaz. Manda órdenes al service worker, muestra el estado,
 // pinta el medidor de nivel y guarda las preferencias de idioma.
 
-import { MSG, TARGET, ESTADO, CLAVE_IDIOMAS } from '../messages.js';
+import { MSG, TARGET, ESTADO, ERROR, CLAVE_IDIOMAS } from '../messages.js';
 
 const elBoton = document.getElementById('botonPrincipal');
 const elEstado = document.getElementById('estado');
@@ -16,7 +16,9 @@ let estadoActual = ESTADO.INACTIVO;
 /* Pintado de la interfaz                                              */
 /* ------------------------------------------------------------------ */
 
-function pintarEstado(estado, textoError = '') {
+// `permitirDetener` fuerza el botón "Detener" aunque estemos en error: es el caso
+// de YA_EN_CAPTURA, donde hay una captura viva que el usuario debe poder cortar.
+function pintarEstado(estado, textoError = '', permitirDetener = false) {
   estadoActual = estado;
 
   const etiquetas = {
@@ -30,17 +32,20 @@ function pintarEstado(estado, textoError = '') {
   elEstado.className = `estado estado--${estado}`;
 
   const capturando = estado === ESTADO.CAPTURANDO;
-  elBoton.textContent = capturando ? 'Detener' : 'Iniciar';
-  elBoton.className = `boton ${capturando ? 'boton--detener' : 'boton--iniciar'}`;
+  const modoDetener = capturando || permitirDetener;
+  elBoton.textContent = modoDetener ? 'Detener' : 'Iniciar';
+  elBoton.className = `boton ${modoDetener ? 'boton--detener' : 'boton--iniciar'}`;
   elBoton.disabled = estado === ESTADO.INICIANDO;
 
   if (!capturando) pintarNivel(0);
 }
 
-// Nivel RMS (0..1) -> anchura de la barra. Escalamos porque el RMS típico es bajo.
+// Nivel RMS (0..1) -> anchura de la barra en escala logarítmica dBFS,
+// que es como percibe el volumen el oído: 0 % = -60 dBFS (silencio), 100 % = 0 dBFS.
 function pintarNivel(rms) {
-  const porcentaje = Math.min(100, Math.round(rms * 320));
-  elBarra.style.width = `${porcentaje}%`;
+  const db = 20 * Math.log10(Math.max(rms, 1e-6));
+  const pct = Math.min(100, Math.max(0, ((db + 60) / 60) * 100)); // piso: -60 dBFS
+  elBarra.style.width = `${pct}%`;
 }
 
 /* ------------------------------------------------------------------ */
@@ -64,8 +69,12 @@ async function iniciar() {
       tabId: pestania.id
     });
 
-    if (respuesta?.ok) pintarEstado(ESTADO.CAPTURANDO);
-    else pintarEstado(ESTADO.ERROR, respuesta?.error || 'No se pudo iniciar la captura.');
+    if (respuesta?.ok) {
+      pintarEstado(ESTADO.CAPTURANDO);
+    } else {
+      const yaEnCaptura = respuesta?.code === ERROR.YA_EN_CAPTURA;
+      pintarEstado(ESTADO.ERROR, respuesta?.error || 'No se pudo iniciar la captura.', yaEnCaptura);
+    }
   } catch (error) {
     pintarEstado(ESTADO.ERROR, String(error?.message || error));
   }
@@ -88,7 +97,9 @@ async function detener() {
 }
 
 elBoton.addEventListener('click', () => {
-  if (estadoActual === ESTADO.CAPTURANDO) detener();
+  // Nos fiamos del texto del botón: cubre también el caso YA_EN_CAPTURA,
+  // donde el estado es ERROR pero sí hay algo vivo que detener.
+  if (elBoton.textContent === 'Detener') detener();
   else iniciar();
 });
 
@@ -130,7 +141,7 @@ chrome.runtime.onMessage.addListener((mensaje) => {
       pintarEstado(ESTADO.INACTIVO);
       break;
     case MSG.CAPTURE_ERROR:
-      pintarEstado(ESTADO.ERROR, mensaje.error);
+      pintarEstado(ESTADO.ERROR, mensaje.error, mensaje.code === ERROR.YA_EN_CAPTURA);
       break;
   }
 });

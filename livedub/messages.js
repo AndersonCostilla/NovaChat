@@ -39,5 +39,19 @@ export const ESTADO = {
   ERROR: 'error'
 };
 
+// Códigos de error que el popup puede distinguir programáticamente.
+export const ERROR = {
+  YA_EN_CAPTURA: 'YA_EN_CAPTURA'
+};
+
+// Estado persistido por el service worker en chrome.storage.session.
+// Es la ÚNICA fuente de verdad: el SW de MV3 se suspende y pierde la memoria.
+export const CLAVE_ESTADO_SESION = 'livedub.estado';
+
+export const ESTADO_SESION = {
+  CAPTURANDO: 'CAPTURANDO',
+  INACTIVO: 'INACTIVO'
+};
+
 // Clave usada en chrome.storage.local para las preferencias de idioma.
 export const CLAVE_IDIOMAS = 'livedub_idiomas';

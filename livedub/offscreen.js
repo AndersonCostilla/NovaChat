@@ -4,7 +4,9 @@
 //
 // Grafo de audio (Fase 1):
 //   MediaStreamSource -> gainOriginal -> destination   (lo que oye el usuario)
-//                                   \-> analyser       (sólo medición)
+//                     \-> analyser                      (medición, nodo hoja)
+// El analyser cuelga de la FUENTE, no de gainOriginal: así el medidor seguirá
+// mostrando el nivel real aunque el ducking baje gainOriginal.
 
 import { MSG, TARGET } from './messages.js';
 
@@ -60,7 +62,7 @@ async function iniciar(streamId) {
 
   fuente.connect(gainOriginal);
   gainOriginal.connect(audioContext.destination);
-  gainOriginal.connect(analyser); // el analyser no va a destination (no suena dos veces)
+  fuente.connect(analyser); // nodo hoja: no va a destination (no suena dos veces)
 
   // Si el usuario cierra la pestaña o detiene el stream desde Chrome.
   stream.getAudioTracks().forEach((pista) => {

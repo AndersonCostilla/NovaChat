@@ -4,18 +4,51 @@
 //  2. Pide el streamId con chrome.tabCapture.getMediaStreamId().
 //  3. Crea (si hace falta) el documento offscreen.
 //  4. Le pasa el streamId para que capture y re-enrute el audio.
+//
+// IMPORTANTE: el service worker de MV3 se suspende a los ~30 s de inactividad y
+// pierde todo lo que tenga en memoria. Por eso el estado de la captura vive en
+// chrome.storage.session (ver CLAVE_ESTADO_SESION), nunca en variables globales.
 
-import { MSG, TARGET, ESTADO } from './messages.js';
+import {
+  MSG,
+  TARGET,
+  ESTADO,
+  ERROR,
+  CLAVE_ESTADO_SESION,
+  ESTADO_SESION
+} from './messages.js';
 
 const RUTA_OFFSCREEN = 'offscreen.html';
 
-// Estado en memoria del service worker. Ojo: el SW puede dormirse, por eso
-// el popup siempre vuelve a preguntar el estado al abrirse (MSG.GET_STATE).
-const estado = {
-  valor: ESTADO.INACTIVO,
-  tabId: null,
-  mensajeError: ''
-};
+// Último error mostrado. Es puramente cosmético (si el SW muere, se pierde y
+// no pasa nada): el estado real SIEMPRE se lee de chrome.storage.session.
+let ultimoError = '';
+
+/* ------------------------------------------------------------------ */
+/* Estado persistente (chrome.storage.session)                         */
+/* ------------------------------------------------------------------ */
+
+// chrome.storage.session existe desde Chrome 102 y sólo necesita el permiso
+// "storage", que ya está declarado en el manifest.
+async function leerEstadoSesion() {
+  const datos = await chrome.storage.session.get(CLAVE_ESTADO_SESION);
+  const guardado = datos?.[CLAVE_ESTADO_SESION];
+  return {
+    status: guardado?.status === ESTADO_SESION.CAPTURANDO
+      ? ESTADO_SESION.CAPTURANDO
+      : ESTADO_SESION.INACTIVO,
+    tabId: typeof guardado?.tabId === 'number' ? guardado.tabId : null
+  };
+}
+
+async function escribirEstadoSesion(status, tabId) {
+  await chrome.storage.session.set({
+    [CLAVE_ESTADO_SESION]: { status, tabId: typeof tabId === 'number' ? tabId : null }
+  });
+}
+
+const marcarCapturando = (tabId) => escribirEstadoSesion(ESTADO_SESION.CAPTURANDO, tabId);
+const marcarInactivo = () => escribirEstadoSesion(ESTADO_SESION.INACTIVO, null);
 
 /* ------------------------------------------------------------------ */
 /* Utilidades                                                          */
@@ -26,11 +59,6 @@ function notificarPopup(mensaje) {
   chrome.runtime.sendMessage({ ...mensaje, target: TARGET.POPUP }).catch(() => {
     /* El popup está cerrado: no es un error. */
   });
-}
-
-function fijarEstado(valor, mensajeError = '') {
-  estado.valor = valor;
-  estado.mensajeError = mensajeError;
 }
 
 // Comprueba si ya existe el documento offscreen.
@@ -76,7 +104,9 @@ async function cerrarOffscreen() {
   }
 }
 
-// Traduce errores técnicos a mensajes comprensibles en español.
+// Traduce errores técnicos a mensajes comprensibles. Los patrones son sólo una
+// HEURÍSTICA: si ninguno encaja, devolvemos el mensaje crudo de Chrome (truncado),
+// que es más útil para depurar que un texto genérico inventado.
 function traducirError(error, url = '') {
   const texto = String(error?.message || error || 'Error desconocido');
 
@@ -92,13 +122,12 @@ function traducirError(error, url = '') {
   if (/Extension has not been invoked|user gesture|activeTab/i.test(texto)) {
     return 'Chrome necesita un gesto del usuario: vuelve a pulsar Iniciar sobre la pestaña.';
   }
-  if (/NotAllowedError|Permission denied|cancel/i.test(texto)) {
-    return 'Permiso denegado o cancelado por el usuario.';
-  }
   if (/NotFoundError|no audio|Invalid stream id/i.test(texto)) {
     return 'La pestaña no tiene audio disponible para capturar.';
   }
-  return texto;
+
+  // Por defecto: mensaje crudo de Chrome, truncado a 120 caracteres.
+  return texto.length > 120 ? `${texto.slice(0, 117)}…` : texto;
 }
 
 /* ------------------------------------------------------------------ */
@@ -108,17 +137,33 @@ function traducirError(error, url = '') {
 async function iniciarCaptura(tabId) {
   let url = '';
   try {
-    const pestania = await chrome.tabs.get(tabId);
+    // ¿Hay ya una captura en marcha según el estado persistido?
+    const sesion = await leerEstadoSesion();
+    if (sesion.status === ESTADO_SESION.CAPTURANDO) {
+      if (await existeOffscreen()) {
+        // Captura real y viva: no pedimos otro streamId (Chrome fallaría).
+        const mensaje = `Ya hay una captura activa (pestaña ${sesion.tabId ?? '?'}). Pulsa Detener para cortarla.`;
+        ultimoError = mensaje;
+        notificarPopup({ type: MSG.CAPTURE_ERROR, error: mensaje, code: ERROR.YA_EN_CAPTURA });
+        return { ok: false, code: ERROR.YA_EN_CAPTURA, error: mensaje, tabId: sesion.tabId };
+      }
+      // Estado huérfano (el offscreen murió): lo limpiamos y seguimos.
+      await marcarInactivo();
+    }
+
+    // La URL sólo sirve para dar un mensaje de error mejor. Si viene vacía
+    // (sin activeTab todavía), NO inventamos un error: intentamos capturar.
+    const pestania = await chrome.tabs.get(tabId).catch(() => null);
     url = pestania?.url || '';
 
-    if (/^(chrome|edge|about|devtools|chrome-extension):/i.test(url)) {
-      throw new Error('Página interna del navegador no capturable.');
+    if (url) {
+      if (/^(chrome|edge|about|devtools|chrome-extension):/i.test(url)) {
+        throw new Error('Página interna del navegador no capturable.');
+      }
+      if (/chromewebstore\.google\.com|chrome\.google\.com\/webstore/i.test(url)) {
+        throw new Error('La Chrome Web Store no es capturable.');
+      }
     }
-    if (/chromewebstore\.google\.com|chrome\.google\.com\/webstore/i.test(url)) {
-      throw new Error('La Chrome Web Store no es capturable.');
-    }
-
-    fijarEstado(ESTADO.INICIANDO);
 
     // 3. streamId: debe pedirse desde el service worker tras un gesto del usuario.
     const streamId = await chrome.tabCapture.getMediaStreamId({ targetTabId: tabId });
@@ -138,15 +183,16 @@ async function iniciarCaptura(tabId) {
       throw new Error(respuesta?.error || 'El documento offscreen no pudo iniciar la captura.');
     }
 
-    estado.tabId = tabId;
-    fijarEstado(ESTADO.CAPTURANDO);
+    ultimoError = '';
+    await marcarCapturando(tabId);
     notificarPopup({ type: MSG.CAPTURE_STARTED, tabId });
-    return { ok: true };
+    return { ok: true, tabId };
   } catch (error) {
     const mensaje = traducirError(error, url);
-    fijarEstado(ESTADO.ERROR, mensaje);
-    // Limpiamos para no dejar un offscreen huérfano.
+    ultimoError = mensaje;
+    // Limpiamos para no dejar un offscreen huérfano ni estado falso.
     await cerrarOffscreen().catch(() => {});
+    await marcarInactivo();
     notificarPopup({ type: MSG.CAPTURE_ERROR, error: mensaje });
     return { ok: false, error: mensaje };
   }
@@ -161,16 +207,34 @@ async function detenerCaptura() {
         .catch(() => {});
       await cerrarOffscreen();
     }
-    estado.tabId = null;
-    fijarEstado(ESTADO.INACTIVO);
+    ultimoError = '';
+    await marcarInactivo();
     notificarPopup({ type: MSG.CAPTURE_STOPPED });
     return { ok: true };
   } catch (error) {
     const mensaje = traducirError(error);
-    fijarEstado(ESTADO.ERROR, mensaje);
+    ultimoError = mensaje;
+    // Aunque falle el cierre, no dejamos el estado mintiendo.
+    await marcarInactivo().catch(() => {});
     notificarPopup({ type: MSG.CAPTURE_ERROR, error: mensaje });
     return { ok: false, error: mensaje };
   }
+}
+
+// Estado para el popup, con AUTO-REPARACIÓN: si el estado dice CAPTURANDO pero
+// el documento offscreen ya no existe, corregimos el estado persistido.
+async function consultarEstado() {
+  const sesion = await leerEstadoSesion();
+
+  if (sesion.status === ESTADO_SESION.CAPTURANDO) {
+    if (await existeOffscreen()) {
+      return { estado: ESTADO.CAPTURANDO, tabId: sesion.tabId, error: '' };
+    }
+    await marcarInactivo(); // auto-reparación
+    return { estado: ESTADO.INACTIVO, tabId: null, error: '' };
+  }
+
+  return { estado: ESTADO.INACTIVO, tabId: null, error: ultimoError };
 }
 
 /* ------------------------------------------------------------------ */
@@ -191,15 +255,7 @@ chrome.runtime.onMessage.addListener((mensaje, _remitente, responder) => {
       return true;
 
     case MSG.GET_STATE:
-      // Si el SW se reinició, el offscreen manda: comprobamos si sigue vivo.
-      existeOffscreen().then((vivo) => {
-        if (!vivo && estado.valor === ESTADO.CAPTURANDO) fijarEstado(ESTADO.INACTIVO);
-        responder({
-          estado: estado.valor,
-          tabId: estado.tabId,
-          error: estado.mensajeError
-        });
-      });
+      consultarEstado().then(responder);
       return true;
 
     default:
@@ -207,7 +263,12 @@ chrome.runtime.onMessage.addListener((mensaje, _remitente, responder) => {
   }
 });
 
-// Si se cierra la pestaña capturada, limpiamos todo.
+// Si se cierra la pestaña capturada, limpiamos todo. El tabId se lee del estado
+// persistido, no de memoria (el SW pudo haberse reiniciado entretanto).
 chrome.tabs.onRemoved.addListener((tabId) => {
-  if (estado.tabId === tabId) detenerCaptura();
+  leerEstadoSesion().then((sesion) => {
+    if (sesion.status === ESTADO_SESION.CAPTURANDO && sesion.tabId === tabId) {
+      detenerCaptura();
+    }
+  });
 });
