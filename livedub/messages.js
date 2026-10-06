@@ -16,6 +16,10 @@ export const MSG = {
   // cualquiera -> offscreen (ajuste de volumen del audio original, 0..1)
   SET_GAIN: 'SET_GAIN',
 
+  // offscreen -> popup (Fase 3)
+  SUBTITLE: 'SUBTITLE',       // nueva transcripción lista
+  MODEL_STATUS: 'MODEL_STATUS', // estado de carga del modelo local
+
   // offscreen/background -> popup
   CAPTURE_STARTED: 'CAPTURE_STARTED',
   CAPTURE_STOPPED: 'CAPTURE_STOPPED',
@@ -52,6 +56,12 @@ export const ESTADO_SESION = {
   CAPTURANDO: 'CAPTURANDO',
   INACTIVO: 'INACTIVO'
 };
+
+// Búfer de subtítulos y estado del modelo en chrome.storage.session, para que
+// el popup pueda cerrarse y reabrirse sin perder lo transcrito.
+export const CLAVE_SUBTITULOS = 'livedub.subtitulos';
+export const CLAVE_MODELO = 'livedub.modelo';
+export const MAX_SUBTITULOS = 20; // cuántas frases guardamos como historial
 
 // Clave usada en chrome.storage.local para las preferencias de idioma.
 export const CLAVE_IDIOMAS = 'livedub_idiomas';

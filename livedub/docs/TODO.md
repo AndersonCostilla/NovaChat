@@ -25,6 +25,29 @@ Registro de cosas detectadas y conscientemente aplazadas.
 - **Sin duración máxima de frase**: si alguien habla sin pausas, `speechChunks`
   crece indefinidamente. Conviene un corte forzado (p. ej. a los 15-20 s).
 
+## Fase 3 — pendientes y avisos
+
+- **Estado de la fase:** código completo y verificado en **Nivel 1** (sintaxis,
+  manifest, ausencia de URLs remotas, degradación sin modelo). **Nivel 2
+  (prueba real en Chrome con los pesos colocados) PENDIENTE** de verificación
+  humana. No se avanza a Fase 4 hasta esa confirmación.
+- **Pesos fuera de Git (decisión explícita):** `livedub/models/whisper-tiny/` está
+  en `.gitignore` salvo `.gitkeep`. Motivo: decenas de MB que hincharían el
+  historial para siempre. Se obtienen con `models/descargar-modelo.sh`.
+- **Nombres de archivo del modelo sin verificar en vivo:** el sandbox donde se
+  escribió el script no tiene acceso a huggingface.co, así que las rutas del
+  script no se pudieron comprobar. Si alguna da 404, ajustar la lista `ARCHIVOS`.
+- **`idiomaDetectado` no es real:** transformers.js 2.x no expone el idioma que
+  Whisper deduce internamente; devolvemos el configurado (o `'auto'`). Si hace
+  falta el idioma real, habrá que leer los tokens de idioma a mano.
+- **`wasm-unsafe-eval` y la Chrome Web Store:** Chrome 116+ lo acepta sin
+  advertencias, pero es un permiso que la revisión de la Store puede cuestionar
+  en el futuro. No bloquea nada ahora; anotado para la fase de publicación.
+- **Sólo se vendorizó `ort-wasm-simd.wasm`** (10 MB): sin hilos (no hay
+  cross-origin isolation) y sin fallback no-SIMD (Chrome 116+ siempre lo tiene).
+- **Latencia por frase sin medir:** depende de la CPU; se reportará tras la
+  prueba real. No se promete tiempo real.
+
 ## Notas de alcance
 
 - El permiso **`scripting`** está declarado pero todavía no se usa:

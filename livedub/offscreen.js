@@ -4,6 +4,8 @@
 //           lo siga oyendo, midiendo su nivel para el medidor del popup.
 //  (Fase 2) en PARALELO, pasar el mismo stream por un segundo contexto a 16 kHz
 //           mono y segmentarlo en "frases" con un VAD por detección de silencios.
+//  (Fase 3) mandar cada frase al worker de transcripción local (Whisper WASM) y
+//           publicar el texto resultante como subtítulo.
 //
 // Grafo de audio:
 //
@@ -17,7 +19,15 @@
 // El analyser cuelga de la FUENTE, no de gainOriginal: así el medidor seguirá
 // mostrando el nivel real aunque el ducking baje gainOriginal.
 
-import { MSG, TARGET } from './messages.js';
+import {
+  MSG,
+  TARGET,
+  CLAVE_SUBTITULOS,
+  CLAVE_MODELO,
+  MAX_SUBTITULOS,
+  CLAVE_IDIOMAS
+} from './messages.js';
+import { crearTranscriptor, ESTADO_MODELO } from './transcriptor.js';
 
 const INTERVALO_NIVEL_MS = 100; // cada cuánto enviamos el nivel al popup
 
@@ -44,6 +54,10 @@ let contextProcessing = null;
 let fuenteProcessing = null;
 let workletNode = null;
 let sumideroMudo = null;
+
+// Transcripción (Fase 3).
+let transcriptor = null;
+let idiomaOrigen = 'auto'; // se lee de chrome.storage.local (preferencias del popup)
 
 /* ------------------------ Estado del VAD --------------------------- */
 let isSpeaking = false;
@@ -83,6 +97,7 @@ async function iniciar(streamId) {
 
   await montarCadenaOriginal();
   await montarCadenaProcesado();
+  await montarTranscriptor();
 
   // Si el usuario cierra la pestaña o detiene el stream desde Chrome.
   stream.getAudioTracks().forEach((pista) => {
@@ -193,15 +208,79 @@ function ensamblarChunks(chunks) {
   return salida;
 }
 
-// Fase 2: de momento SÓLO registramos la frase por consola.
-// (La transcripción llega en una fase posterior.)
+// Fase 2 + 3: registramos la frase y la mandamos a transcribir.
 function onFraseDetectada(float32Array) {
-  console.log(
-    '🗣️ Frase detectada:',
-    float32Array.length / FRECUENCIA_PROCESO,
-    'segundos',
-    float32Array
-  );
+  const segundos = float32Array.length / FRECUENCIA_PROCESO;
+  console.log('🗣️ Frase detectada:', segundos, 'segundos', float32Array);
+
+  // Si el modelo no está disponible seguimos en modo "solo captura": el VAD
+  // sigue trabajando y la extensión no se rompe, simplemente no hay subtítulo.
+  transcriptor?.transcribir(float32Array, idiomaOrigen);
+}
+
+/* ------------------------------------------------------------------ */
+/* Transcripción local (Fase 3)                                        */
+/* ------------------------------------------------------------------ */
+
+async function montarTranscriptor() {
+  // Idioma origen elegido por el usuario en el popup (sólo preferencia).
+  try {
+    const datos = await chrome.storage.local.get(CLAVE_IDIOMAS);
+    idiomaOrigen = datos?.[CLAVE_IDIOMAS]?.origen || 'auto';
+  } catch (_) {
+    idiomaOrigen = 'auto';
+  }
+
+  transcriptor = crearTranscriptor({
+    onEstado: (info) => publicarEstadoModelo(info),
+    onResultado: (resultado) => publicarSubtitulo(resultado),
+    onError: (error) => console.warn('[LiveDub] Error transcribiendo una frase:', error)
+  });
+
+  // Rutas LOCALES (chrome-extension://). Nunca hay una URL remota aquí.
+  transcriptor.iniciar({
+    rutaModelos: chrome.runtime.getURL('models/'),
+    rutaWasm: chrome.runtime.getURL('libs/transformers/'),
+    modelo: 'whisper-tiny'
+  });
+}
+
+// Estado del modelo -> popup (si está abierto) + storage.session (si no lo está).
+async function publicarEstadoModelo(info) {
+  const carga = {
+    estado: info?.estado ?? ESTADO_MODELO.INACTIVO,
+    detalle: info?.detalle ?? '',
+    t: Date.now()
+  };
+
+  try {
+    await chrome.storage.session.set({ [CLAVE_MODELO]: carga });
+  } catch (_) {
+    /* storage puede fallar si el contexto se está cerrando */
+  }
+
+  chrome.runtime
+    .sendMessage({ type: MSG.MODEL_STATUS, target: TARGET.POPUP, ...carga })
+    .catch(() => {});
+}
+
+// Subtítulo -> popup + historial en storage.session (máx. MAX_SUBTITULOS).
+async function publicarSubtitulo({ texto, idiomaDetectado, duracionMs }) {
+  const subtitulo = { texto, idioma: idiomaDetectado, duracionMs, t: Date.now() };
+
+  try {
+    const datos = await chrome.storage.session.get(CLAVE_SUBTITULOS);
+    const historial = Array.isArray(datos?.[CLAVE_SUBTITULOS]) ? datos[CLAVE_SUBTITULOS] : [];
+    historial.push(subtitulo);
+    while (historial.length > MAX_SUBTITULOS) historial.shift();
+    await chrome.storage.session.set({ [CLAVE_SUBTITULOS]: historial });
+  } catch (_) {
+    /* si falla el guardado, al menos intentamos avisar al popup */
+  }
+
+  chrome.runtime
+    .sendMessage({ type: MSG.SUBTITLE, target: TARGET.POPUP, ...subtitulo })
+    .catch(() => {});
 }
 
 /* ------------------------------------------------------------------ */
@@ -244,6 +323,10 @@ function pararMedidor() {
 // lo hace el background con chrome.offscreen.closeDocument().)
 async function detener() {
   pararMedidor();
+
+  // --- Transcripción (Fase 3) ---
+  transcriptor?.destruir();
+  transcriptor = null;
 
   if (stream) {
     stream.getTracks().forEach((pista) => pista.stop());
@@ -343,7 +426,9 @@ globalThis.livedub = {
     contextOriginal: contextOriginal?.state ?? 'cerrado',
     contextProcessing: contextProcessing?.state ?? 'cerrado',
     frecuenciaProceso: contextProcessing?.sampleRate ?? null,
-    vad: { isSpeaking, bloquesAcumulados: speechChunks.length, silenceCounter }
+    vad: { isSpeaking, bloquesAcumulados: speechChunks.length, silenceCounter },
+    modelo: transcriptor?.obtenerEstado() ?? 'inactivo',
+    idiomaOrigen
   }),
   // Permite afinar el umbral en caliente sin recargar la extensión.
   vadInfo: () => ({ VAD_THRESHOLD, MAX_SILENCE_CHUNKS })

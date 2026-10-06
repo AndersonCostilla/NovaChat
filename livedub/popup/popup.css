@@ -147,3 +147,64 @@ select {
   font-size: 11px;
   line-height: 1.35;
 }
+
+/* ---------------- Subtítulos en vivo (Fase 3) ---------------- */
+
+.subtitulos__cabecera {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.subtitulos__cabecera h2 {
+  margin: 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--suave);
+}
+
+.modelo {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  white-space: nowrap;
+}
+
+.modelo--inactivo { background: #2a2e36; color: var(--suave); }
+.modelo--cargando { background: #3a3418; color: #e8d26a; }
+.modelo--listo    { background: #16331f; color: #7fe09b; }
+.modelo--error    { background: #3a1b1b; color: #ff9b9b; }
+
+.subtitulos {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 160px;
+  overflow-y: auto;
+  background: #0e1013;
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+}
+
+.subtitulos li {
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--borde);
+  line-height: 1.35;
+}
+
+.subtitulos li:last-child { border-bottom: 0; }
+
+.subtitulos__vacio {
+  color: var(--suave);
+  font-style: italic;
+}
+
+.subtitulo__meta {
+  display: block;
+  color: var(--suave);
+  font-size: 10px;
+  margin-bottom: 2px;
+}

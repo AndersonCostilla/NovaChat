@@ -2,13 +2,24 @@
 // Responsabilidad: interfaz. Manda órdenes al service worker, muestra el estado,
 // pinta el medidor de nivel y guarda las preferencias de idioma.
 
-import { MSG, TARGET, ESTADO, ERROR, CLAVE_IDIOMAS } from '../messages.js';
+import {
+  MSG,
+  TARGET,
+  ESTADO,
+  ERROR,
+  CLAVE_IDIOMAS,
+  CLAVE_SUBTITULOS,
+  CLAVE_MODELO,
+  MAX_SUBTITULOS
+} from '../messages.js';
 
 const elBoton = document.getElementById('botonPrincipal');
 const elEstado = document.getElementById('estado');
 const elBarra = document.getElementById('barraNivel');
 const elOrigen = document.getElementById('idiomaOrigen');
 const elDestino = document.getElementById('idiomaDestino');
+const elListaSubtitulos = document.getElementById('listaSubtitulos');
+const elEstadoModelo = document.getElementById('estadoModelo');
 
 let estadoActual = ESTADO.INACTIVO;
 
@@ -46,6 +57,85 @@ function pintarNivel(rms) {
   const db = 20 * Math.log10(Math.max(rms, 1e-6));
   const pct = Math.min(100, Math.max(0, ((db + 60) / 60) * 100)); // piso: -60 dBFS
   elBarra.style.width = `${pct}%`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Subtítulos en vivo (Fase 3)                                         */
+/* ------------------------------------------------------------------ */
+
+// Historial que se pinta; se rellena desde storage.session al abrir el popup.
+let subtitulos = [];
+
+function horaDe(t) {
+  return new Date(t).toLocaleTimeString('es', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  });
+}
+
+function pintarSubtitulos() {
+  elListaSubtitulos.replaceChildren();
+
+  if (subtitulos.length === 0) {
+    const vacio = document.createElement('li');
+    vacio.className = 'subtitulos__vacio';
+    vacio.textContent = 'Aún no hay transcripciones.';
+    elListaSubtitulos.appendChild(vacio);
+    return;
+  }
+
+  for (const s of subtitulos) {
+    const li = document.createElement('li');
+
+    const meta = document.createElement('span');
+    meta.className = 'subtitulo__meta';
+    const idioma = s.idioma && s.idioma !== 'auto' ? ` · ${s.idioma}` : '';
+    const tardanza = s.duracionMs ? ` · ${(s.duracionMs / 1000).toFixed(1)} s` : '';
+    meta.textContent = `${horaDe(s.t)}${idioma}${tardanza}`;
+
+    const texto = document.createElement('span');
+    texto.textContent = s.texto; // textContent: nada de HTML inyectado
+
+    li.append(meta, texto);
+    elListaSubtitulos.appendChild(li);
+  }
+
+  // Siempre mirando lo último transcrito.
+  elListaSubtitulos.scrollTop = elListaSubtitulos.scrollHeight;
+}
+
+function agregarSubtitulo(subtitulo) {
+  subtitulos.push(subtitulo);
+  while (subtitulos.length > MAX_SUBTITULOS) subtitulos.shift();
+  pintarSubtitulos();
+}
+
+function pintarEstadoModelo(info) {
+  const estado = info?.estado || 'inactivo';
+  const etiquetas = {
+    inactivo: 'Modelo inactivo',
+    cargando: info?.detalle || 'Cargando modelo local…',
+    listo: 'Modelo listo',
+    error: 'Modelo no disponible'
+  };
+  elEstadoModelo.textContent = etiquetas[estado] ?? 'Modelo inactivo';
+  elEstadoModelo.className = `modelo modelo--${estado}`;
+  // El detalle completo del error se ve al pasar el ratón por encima.
+  elEstadoModelo.title = info?.detalle || '';
+}
+
+// Al abrir el popup recuperamos lo que haya en storage.session: así no se
+// pierden los subtítulos aunque el popup haya estado cerrado.
+async function cargarHistorial() {
+  try {
+    const datos = await chrome.storage.session.get([CLAVE_SUBTITULOS, CLAVE_MODELO]);
+    subtitulos = Array.isArray(datos?.[CLAVE_SUBTITULOS]) ? datos[CLAVE_SUBTITULOS] : [];
+    pintarSubtitulos();
+    pintarEstadoModelo(datos?.[CLAVE_MODELO]);
+  } catch (_) {
+    pintarSubtitulos();
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -140,6 +230,19 @@ chrome.runtime.onMessage.addListener((mensaje) => {
     case MSG.CAPTURE_STOPPED:
       pintarEstado(ESTADO.INACTIVO);
       break;
+    case MSG.SUBTITLE:
+      agregarSubtitulo({
+        texto: mensaje.texto,
+        idioma: mensaje.idioma,
+        duracionMs: mensaje.duracionMs,
+        t: mensaje.t || Date.now()
+      });
+      break;
+
+    case MSG.MODEL_STATUS:
+      pintarEstadoModelo({ estado: mensaje.estado, detalle: mensaje.detalle });
+      break;
+
     case MSG.CAPTURE_ERROR:
       pintarEstado(ESTADO.ERROR, mensaje.error, mensaje.code === ERROR.YA_EN_CAPTURA);
       break;
@@ -152,6 +255,7 @@ chrome.runtime.onMessage.addListener((mensaje) => {
 
 (async function inicializar() {
   await cargarIdiomas();
+  await cargarHistorial();
   try {
     const estado = await chrome.runtime.sendMessage({
       type: MSG.GET_STATE,

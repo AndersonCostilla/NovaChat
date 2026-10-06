@@ -1,4 +1,4 @@
-# LiveDub — Fases 1-2 (captura de audio + segmentación VAD)
+# LiveDub — Fases 1-3 (captura + VAD + transcripción local)
 
 Extensión de Chrome (Manifest V3) en JavaScript vanilla con módulos ES.
 **Sin frameworks, sin paso de build, sin CDN, sin servicios de pago.**
@@ -14,7 +14,13 @@ Hasta ahora LiveDub **sólo** hace esto:
    16 kHz mono y lo trocea en "frases" con un VAD por detección de silencios.
    Cada frase detectada se registra por consola del offscreen; nada más.
 
-**No hay transcripción, ni traducción, ni TTS.** Eso llega en fases posteriores.
+6. **(Fase 3)** Transcribe cada frase **en local** con Whisper (ONNX int8 vía
+   transformers.js + WASM, sin red) en un Worker dedicado, y muestra el texto en
+   el panel «Subtítulos en vivo» del popup.
+
+**No hay traducción, ni TTS, ni ducking real, ni overlay en la página.**
+Eso llega en fases posteriores. La transcripción es en el idioma original
+(`task: 'transcribe'`, nunca `translate`).
 
 ## Arquitectura de audio
 
@@ -33,7 +39,30 @@ los manda a `offscreen.js`, que aplica la máquina de estados del VAD:
 
 Para ver las frases: abre la consola del documento offscreen y busca
 `🗣️ Frase detectada: 2.048 segundos Float32Array(32768)`.
-Estado del VAD en caliente: `livedub.estado()`.
+Estado del VAD y del modelo en caliente: `livedub.estado()`.
+
+## Transcripción local (Fase 3)
+
+```
+offscreen.js  --frase (Float32Array 16 kHz)-->  transcriptor.js
+                                                   |  postMessage (buffer transferido)
+                                                   v
+                                          transcriptor-worker.js  (Worker type: module)
+                                                   |  pipeline('automatic-speech-recognition')
+                                                   v
+                                          whisper-tiny int8, WASM, 100 % local
+                                                   |
+offscreen.js  <--{ texto, idiomaDetectado, duracionMs }--
+     |-- chrome.runtime.sendMessage  -> popup (si está abierto)
+     '-- chrome.storage.session      -> historial de 20 subtítulos (si está cerrado)
+```
+
+**Antes de usarlo hay que colocar los pesos**: `bash livedub/models/descargar-modelo.sh`
+(ver `models/README.md`). Sin pesos, el popup muestra «Modelo no disponible» y
+LiveDub funciona en **modo solo captura**, sin romperse.
+
+Reglas de la cola: una frase en vuelo a la vez, como mucho 2 esperando (las más
+viejas se descartan para no acumular retraso) y 120 s de tiempo máximo por frase.
 
 ---
 
@@ -47,6 +76,10 @@ livedub/
   offscreen.html
   offscreen.js         getUserMedia + grafo de audio + medidor + máquina VAD
   vad-processor.js     AudioWorkletProcessor: bloques de 4096 muestras + RMS
+  transcriptor.js      Orquestación: cola de frases y estado del modelo
+  transcriptor-worker.js  Worker dedicado: pipeline Whisper local (WASM)
+  libs/transformers/   @xenova/transformers 2.17.2 vendorizado + ort-wasm-simd
+  models/whisper-tiny/ Pesos del modelo (NO están en Git, ver models/README.md)
   popup/
     popup.html
     popup.css

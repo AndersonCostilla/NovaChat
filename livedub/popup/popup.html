@@ -22,6 +22,16 @@
     </section>
 
     <section class="bloque">
+      <div class="subtitulos__cabecera">
+        <h2>Subtítulos en vivo</h2>
+        <span id="estadoModelo" class="modelo modelo--inactivo">Modelo inactivo</span>
+      </div>
+      <ul id="listaSubtitulos" class="subtitulos">
+        <li class="subtitulos__vacio">Aún no hay transcripciones.</li>
+      </ul>
+    </section>
+
+    <section class="bloque">
       <label class="campo">
         <span>Idioma origen</span>
         <select id="idiomaOrigen">
@@ -49,7 +59,11 @@
         </select>
       </label>
 
-      <p class="nota">Los idiomas todavía no hacen nada: se usarán en fases posteriores.</p>
+      <p class="nota">
+        El idioma origen se usa para la transcripción local
+        («Detectar automáticamente» deja que Whisper lo deduzca).
+        El idioma destino todavía no hace nada: se usará al traducir.
+      </p>
     </section>
 
     <script type="module" src="popup.js"></script>
