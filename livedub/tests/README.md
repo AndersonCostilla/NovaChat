@@ -14,6 +14,7 @@ node livedub/tests/test-vad-corte.mjs    # corte forzado de frases largas
 node livedub/tests/test-traduccion.mjs   # traducción: heurística, cola y persistencia
 node livedub/tests/test-offscreen-apis.mjs  # APIs de chrome permitidas por contexto
 node livedub/tests/test-traductor-vigilante.mjs  # límite de tiempo de carga del traductor
+node livedub/tests/test-segmentador.mjs  # troceo en oraciones y truncamiento de OPUS-MT
 ```
 
 Cada script termina con código 0 si pasa y 1 si falla.
@@ -53,6 +54,12 @@ Cada script termina con código 0 si pasa y 1 si falla.
   los 90 s el estado pasa solo a `error` y que ninguna frase encolada se queda
   colgada. Verificada desactivando el vigilante: sin él, sólo 2 de 6 promesas
   se resuelven — que es exactamente el bug que reportó Anderson.
+
+- **`test-segmentador.mjs`** usa un modelo simulado que **imita el defecto real
+  de OPUS-MT** (ante varias oraciones devuelve sólo una) y lo alimenta con los
+  tres casos reales que reportó Anderson, más textos de 100+ palabras y texto
+  sin puntuación. Comprueba que con troceo no se pierde ninguna oración: en el
+  caso 1, 31 caracteres de salida sin trocear frente a 208 con troceo.
 
 Ninguna prueba Chrome, Web Audio, WASM ni el modelo: eso sólo se
 valida a mano (ver `docs/PRUEBA-NIVEL2.md`).

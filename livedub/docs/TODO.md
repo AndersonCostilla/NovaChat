@@ -147,6 +147,33 @@ Descartadas con evidencia: la tarea `translation` **sí** está registrada en el
 bundle; las claves de estado de transcripción y traducción son distintas (no hay
 carrera entre módulos); el camino de publicación de estado no traga errores.
 
+## Fase 4 — traducciones truncadas (9 muestras reales de Anderson)
+
+Síntoma: frases largas traducidas a una sola oración. Ejemplo medido: entrada
+de 4 oraciones → salida con la traducción de la última únicamente.
+
+**Causa: OPUS-MT (Marian) es un modelo de ORACIÓN, no de párrafo.** Con varias
+oraciones de golpe emite el token de fin tras una y descarta el resto.
+
+Descartado con evidencia (NO era el límite de longitud): en
+`transformers.min.js`, `const u = c + (t.max_new_tokens ?? Infinity)` da un tope
+de 257 tokens, y `p = Number.isInteger(max_length) && max_new_tokens === null`
+es `false` cuando pasamos `max_new_tokens`, así que `max_length` ni se mira. Las
+salidas truncadas rondaban los 10 tokens: el techo nunca se tocó.
+
+**Arreglo:** `segmentador.js` trocea en oraciones antes de traducir y vuelve a
+unir después. El pipeline acepta un array y lo procesa como LOTE en una sola
+llamada a `generate()` (verificado: `Array.isArray(e)||(e=[e])` → `batch_decode`).
+
+**Latencia:** `_get_generation_config` fusiona `config.json` y
+`generation_config.json` del modelo ANTES que nuestras opciones, y OPUS-MT
+publica `num_beams: 4`. Ahora se fuerza `NUM_BEAMS = 1` en
+`traductor-worker.js` y se escribe en consola qué traía el modelo. Revertir a 4
+es cambiar una constante.
+
+Límite duro conocido: `wasm.numThreads = 1`. Sin aislamiento de origen cruzado
+no hay hilos de WebAssembly, así que la traducción va en un solo núcleo.
+
 ## Fase 4 — traducción inglés → español
 
 - **Estado:** código completo, **Nivel 1 verificado** (node --check, manifest,

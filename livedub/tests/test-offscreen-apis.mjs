@@ -16,7 +16,12 @@ console.log('1) APIs de chrome usadas en los contextos restringidos');
 
 const fs = await import('node:fs');
 const ARCHIVOS_OFFSCREEN = ['../offscreen.js', '../transcriptor.js', '../traductor.js'];
-const ARCHIVOS_WORKER = ['../transcriptor-worker.js', '../traductor-worker.js', '../vad-processor.js'];
+const ARCHIVOS_WORKER = [
+  '../transcriptor-worker.js',
+  '../traductor-worker.js',
+  '../vad-processor.js',
+  '../segmentador.js' // se carga dentro del worker de traducción
+];
 
 function apisUsadas(ruta) {
   const codigo = fs.readFileSync(new URL(ruta, import.meta.url), 'utf8')

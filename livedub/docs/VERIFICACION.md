@@ -116,6 +116,9 @@ reales capturados en Chrome):
 | 11 | Ningún archivo del offscreen usa APIs fuera de `chrome.runtime`, y `offscreen.js` carga con el `chrome` restringido real | EJECUTADO (`tests/test-offscreen-apis.mjs`) | 7/7 — verificada reintroduciendo el bug |
 | 12 | Un worker de traducción que no responde acaba en `error` y no deja promesas colgadas | EJECUTADO (`tests/test-traductor-vigilante.mjs`) | 11/11 — verificada desactivando el vigilante (2/6 colgadas) |
 | 13 | La lista de archivos del modelo traductor coincide con lo que exige la librería | EJECUTADO (lectura de `transformers.min.js`) | `tokenizer.json` era obligatorio y faltaba en el script |
+| 14 | Un texto de varias oraciones se trocea y no se pierde ninguna al traducir | EJECUTADO (`tests/test-segmentador.mjs`) | 24/24, con los 3 casos reales de Anderson |
+| 15 | `max_new_tokens` NO era la causa del truncamiento | EJECUTADO (lectura del bucle de generación) | tope real 257 tokens; salidas truncadas de ~10 |
+| 16 | Latencia real por frase tras el troceo y `num_beams=1` | **PENDIENTE (humano)** | requiere nuevas muestras en Chrome |
 
 **Nivel 1 verificado / Nivel 2 pendiente de pesos + Chrome real.**
 

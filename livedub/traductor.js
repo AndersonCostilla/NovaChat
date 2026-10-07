@@ -134,7 +134,8 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
       case 'RESULTADO':
         resolverPendiente(mensaje.id, {
           traduccion: mensaje.traduccion,
-          duracionMs: mensaje.duracionMs
+          duracionMs: mensaje.duracionMs,
+          trozos: mensaje.trozos // nº de oraciones en que se partió la frase
         });
         enVuelo = false;
         procesarCola();
