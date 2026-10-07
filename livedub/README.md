@@ -80,7 +80,12 @@ Cuándo se traduce:
 |---|---|
 | **Inglés** | Traduce siempre |
 | **Detectar automáticamente** | Aplica la heurística de `detector-idioma.js`; si no parece inglés, no traduce y avisa |
+
 | Cualquier otro | No traduce y avisa en el propio subtítulo |
+
+El selector del popup se guarda en `chrome.storage.local` y **se aplica en
+caliente**: cambiarlo con la captura en marcha afecta a la siguiente frase, sin
+Detener e Iniciar.
 
 La heurística existe porque transformers.js 2.x no expone el idioma que Whisper
 detecta; antes que traducir francés con un modelo en→es, se avisa. Si el usuario

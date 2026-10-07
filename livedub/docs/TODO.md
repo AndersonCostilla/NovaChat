@@ -122,7 +122,10 @@ Ajustes añadidos al cerrar, a partir de los hallazgos del usuario:
   de publicar el original y actualizarlo después. Motivo: no reinventar el canal
   de persistencia con actualizaciones parciales. Coste: el subtítulo aparece
   ~0.3-1 s más tarde (lo que tarde la traducción).
-- **El selector de idioma destino sigue sin efecto**: esta fase es sólo en→es.
+- **El selector de idioma ORIGEN sí está conectado** (fuerza el idioma de Whisper
+  y decide si se traduce) y se aplica en caliente vía `chrome.storage.onChanged`.
+  **El de idioma DESTINO sigue sin efecto**: esta fase es sólo en→es.
+- Plantilla de pruebas de esta fase: `docs/PRUEBA-NIVEL2-FASE4.md`.
 
 ## Notas de alcance
 

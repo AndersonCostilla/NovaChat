@@ -265,13 +265,8 @@ function onFraseDetectada(float32Array) {
 /* ------------------------------------------------------------------ */
 
 async function montarTranscriptor() {
-  // Idioma origen elegido por el usuario en el popup (sólo preferencia).
-  try {
-    const datos = await chrome.storage.local.get(CLAVE_IDIOMAS);
-    idiomaOrigen = datos?.[CLAVE_IDIOMAS]?.origen || 'auto';
-  } catch (_) {
-    idiomaOrigen = 'auto';
-  }
+  // Idioma origen elegido por el usuario en el popup.
+  await leerIdiomaOrigen();
 
   transcriptor = crearTranscriptor({
     onEstado: (info) => publicarEstadoModelo(info),
@@ -320,6 +315,26 @@ function montarTraductor() {
 /* ------------------------------------------------------------------ */
 /* Regla de idioma (Fase 4: sólo inglés → español)                     */
 /* ------------------------------------------------------------------ */
+
+async function leerIdiomaOrigen() {
+  try {
+    const datos = await chrome.storage.local.get(CLAVE_IDIOMAS);
+    idiomaOrigen = datos?.[CLAVE_IDIOMAS]?.origen || 'auto';
+  } catch (_) {
+    idiomaOrigen = 'auto';
+  }
+  return idiomaOrigen;
+}
+
+// Si el usuario cambia el idioma origen con la captura en marcha, se aplica a
+// la SIGUIENTE frase: no hace falta Detener e Iniciar.
+chrome.storage.onChanged.addListener((cambios, area) => {
+  if (area !== 'local' || !cambios[CLAVE_IDIOMAS]) return;
+  const nuevo = cambios[CLAVE_IDIOMAS].newValue?.origen || 'auto';
+  if (nuevo === idiomaOrigen) return;
+  idiomaOrigen = nuevo;
+  console.log(`[LiveDub] Idioma origen cambiado a "${idiomaOrigen}" (afecta a la próxima frase).`);
+});
 
 // Decide si una transcripción se traduce. Devuelve { traducir, aviso }.
 function decidirTraduccion(texto) {
