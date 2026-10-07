@@ -80,9 +80,10 @@ Registro de cosas detectadas y conscientemente aplazadas.
 
 ## Fase 3 — cierre (verificada en Chrome real)
 
-Resultados completos en `docs/VERIFICACION.md`. Resumen: todo ✅ salvo el fallo
-tipo B (encoder truncado), no probado. Latencias reales en i5-12400:
-1.9-4.6 s por frase. Offline confirmado con cero peticiones de red.
+Resultados completos en `docs/VERIFICACION.md`. **Checklist de Nivel 2 completo:
+todo ✅, sin huecos.** Latencias reales en i5-12400: 1.9-4.6 s por frase.
+Offline confirmado con cero peticiones de red. Los dos modos de fallo del modelo
+(ausente y corrupto) degradan de forma controlada a modo «solo captura».
 
 Ajustes añadidos al cerrar, a partir de los hallazgos del usuario:
 
@@ -96,8 +97,10 @@ Ajustes añadidos al cerrar, a partir de los hallazgos del usuario:
 
 ### Pendientes residuales de Fase 3 (no bloquean la Fase 4)
 
-- Prueba del fallo tipo B (encoder truncado). En Windows, `truncate` no existe;
-  el equivalente en PowerShell está en `docs/PRUEBA-NIVEL2.md`.
+- El **badge** siempre dice «Modelo no disponible» en caso de error; la causa
+  concreta está en el `title` (tooltip). Decisión consciente: el usuario común no
+  distingue «falta» de «corrupto», y quien depura pasa el ratón por encima.
+
 - Calibración de `VAD_THRESHOLD` con datos reales (`livedub.vadDebug(true)`).
   Sigue en 0.005, valor puesto a ojo y nunca ajustado con medidas.
 - Vigilar si con frases de 12 s reaparecen repeticiones menores en audio denso.

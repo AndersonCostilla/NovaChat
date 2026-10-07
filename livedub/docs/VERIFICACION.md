@@ -79,11 +79,20 @@ inglés y habla continua.
 | Badge del modelo (Bug 2) | ✅ | «Transcribiendo…» en azul durante la inferencia, «Modelo listo» al terminar |
 | **Offline** | ✅ | DevTools → *Sin conexión*: **cero peticiones** en la pestaña Red y la transcripción sigue funcionando |
 | Fallo A: `onnx/` ausente | ✅ | `Unable to load from local path "...encoder_model_quantized.onnx": "TypeError: Failed to fetch"`, badge «Modelo no disponible», **sin excepción no capturada**; captura + medidor + VAD siguen vivos |
-| Fallo B: encoder truncado | ⬜ | No probado (el fallo A ya demostró degradación robusta) |
+| Fallo B: encoder truncado | ✅ | `Failed to load model because protobuf parsing failed`, badge «Modelo no disponible», `livedub.estado()` → `modelo: "error"`; captura + VAD intactos |
 | Fases 1 y 2, sin regresiones | ✅ | Captura, doble AudioContext, medidor y persistencia de estado estables durante toda la sesión |
 | Corte forzado a ~12 s | ✅ | Desaparece la alucinación repetitiva; transcripciones coherentes |
 
-**Fase 3 CERRADA** con el fallo B como único hueco conocido del checklist.
+**Fase 3 CERRADA — checklist de Nivel 2 completo, sin huecos.**
+
+Los dos modos de fallo producen mensajes internos distintos y ambos se traducen
+ahora a una causa accionable en el tooltip del badge (comprobado con los textos
+reales capturados en Chrome):
+
+| Error real de Chrome | Texto mostrado |
+|---|---|
+| `Unable to load from local path ...: TypeError: Failed to fetch` | «Faltan los archivos del modelo en livedub/models/whisper-tiny/…» |
+| `Failed to load model because protobuf parsing failed` | «El archivo del modelo está corrupto o incompleto: vuelve a ejecutar models/descargar-modelo.sh» |
 
 ## Fases 1 y 2 — estado
 

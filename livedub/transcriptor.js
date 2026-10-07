@@ -109,7 +109,16 @@ export function crearTranscriptor({ onEstado, onActividad, onResultado, onError 
   // Mensajes de error típicos cuando faltan los pesos o el WASM.
   function traducirErrorModelo(bruto) {
     const texto = String(bruto || '');
-    if (/404|not found|Could not locate|no such file/i.test(texto)) {
+
+    // Archivo presente pero roto o a medias (visto en la prueba de Nivel 2:
+    // "Failed to load model because protobuf parsing failed").
+    if (/protobuf|InvalidProtobuf|corrupt|Failed to load model/i.test(texto)) {
+      return 'El archivo del modelo está corrupto o incompleto: vuelve a ejecutar models/descargar-modelo.sh. La captura sigue funcionando.';
+    }
+
+    // Archivo directamente ausente (fallo A de la prueba de Nivel 2:
+    // "Unable to load from local path ...: TypeError: Failed to fetch").
+    if (/Unable to load from local path|Failed to fetch|404|not found|Could not locate|no such file/i.test(texto)) {
       return 'Faltan los archivos del modelo en livedub/models/whisper-tiny/ (ver README). La captura sigue funcionando.';
     }
     if (/wasm|WebAssembly|magic word|CompileError/i.test(texto)) {
