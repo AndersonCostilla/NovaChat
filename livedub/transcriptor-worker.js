@@ -39,6 +39,16 @@ function configurarEntorno({ rutaModelos, rutaWasm }) {
   wasm.wasmPaths = rutaWasm; // chrome-extension://<id>/libs/transformers/
   wasm.numThreads = 1; // sin cross-origin isolation no hay hilos
   wasm.proxy = false; // ya estamos dentro de un worker
+
+  // Bajamos el nivel de log de ONNX Runtime: por defecto escupe decenas de
+  // avisos "CleanUnusedInitializersAndNodeArgs..." en cada carga, puro ruido
+  // que se confunde con errores reales. Va en try/catch porque es una API
+  // interna de onnxruntime-web y podría cambiar entre versiones.
+  try {
+    if (env.backends.onnx.env) env.backends.onnx.env.logLevel = 'error';
+  } catch (_) {
+    /* si no se puede, sólo tendremos consola más ruidosa */
+  }
 }
 
 /* ------------------------------------------------------------------ */

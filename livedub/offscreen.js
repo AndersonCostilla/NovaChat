@@ -38,6 +38,7 @@ const MAX_SILENCE_CHUNKS = 3; // bloques de silencio seguidos para cerrar la fra
 const MAX_FRASE_CHUNKS = 47;
 
 let depurarVad = false; // livedub.vadDebug(true) imprime el RMS de cada bloque
+let frasesDescartadas = 0; // frases que el VAD cortó pero nadie transcribió
 
 /* ------------------- Referencias vivas de la captura --------------- */
 let stream = null;
@@ -231,12 +232,27 @@ function ensamblarChunks(chunks) {
 
 // Fase 2 + 3: registramos la frase y la mandamos a transcribir.
 function onFraseDetectada(float32Array) {
-  const segundos = float32Array.length / FRECUENCIA_PROCESO;
-  console.log('🗣️ Frase detectada:', segundos, 'segundos', float32Array);
+  const segundos = (float32Array.length / FRECUENCIA_PROCESO).toFixed(2);
 
   // Si el modelo no está disponible seguimos en modo "solo captura": el VAD
   // sigue trabajando y la extensión no se rompe, simplemente no hay subtítulo.
-  transcriptor?.transcribir(float32Array, idiomaOrigen);
+  const aceptada = transcriptor?.transcribir(float32Array, idiomaOrigen);
+
+  if (aceptada) {
+    console.log(`🗣️ Frase detectada: ${segundos} s → enviada a transcribir (#${aceptada})`);
+    return;
+  }
+
+  // Dejar claro que la frase NO se está transcribiendo, en vez de aparentar
+  // trabajo: era confuso durante las pruebas con el modelo ausente.
+  frasesDescartadas++;
+  const motivo = transcriptor
+    ? `modelo en estado "${transcriptor.obtenerEstado()}"`
+    : 'transcriptor no iniciado';
+  console.log(
+    `🗣️ Frase detectada: ${segundos} s → DESCARTADA (${motivo}). ` +
+      `Total descartadas: ${frasesDescartadas}`
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -404,6 +420,7 @@ async function detener() {
   contextOriginal = null;
 
   reiniciarVad();
+  frasesDescartadas = 0;
 }
 
 // Ajuste de volumen del audio original (0..1). Lo usará el ducking.
@@ -459,6 +476,7 @@ globalThis.livedub = {
     frecuenciaProceso: contextProcessing?.sampleRate ?? null,
     vad: { isSpeaking, bloquesAcumulados: speechChunks.length, silenceCounter },
     modelo: transcriptor?.obtenerEstado() ?? 'inactivo',
+    frasesDescartadas,
     idiomaOrigen
   }),
   // Permite afinar el VAD en caliente, sin recargar la extensión.

@@ -78,6 +78,30 @@ Registro de cosas detectadas y conscientemente aplazadas.
 - **Latencias medidas por el usuario** (i5-12400, 6c/12h): 1.9 / 1.9 / 2.1 / 3.3
   / 3.6 / 4.6 s por frase, escalando con la duración del audio.
 
+## Fase 3 — cierre (verificada en Chrome real)
+
+Resultados completos en `docs/VERIFICACION.md`. Resumen: todo ✅ salvo el fallo
+tipo B (encoder truncado), no probado. Latencias reales en i5-12400:
+1.9-4.6 s por frase. Offline confirmado con cero peticiones de red.
+
+Ajustes añadidos al cerrar, a partir de los hallazgos del usuario:
+
+- **Ruido del motor ONNX**: `env.backends.onnx.env.logLevel = 'error'` en el
+  worker (dentro de `try/catch`, es API interna de onnxruntime-web) para callar
+  las decenas de avisos `CleanUnusedInitializersAndNodeArgs`. **No verificado en
+  Chrome**: si siguen apareciendo, se quita y se asume el ruido.
+- **Frases descartadas**: cuando el modelo no está disponible, el log del
+  offscreen ya no finge trabajo; dice `DESCARTADA (modelo en estado "error")`
+  y lleva un contador, visible también en `livedub.estado().frasesDescartadas`.
+
+### Pendientes residuales de Fase 3 (no bloquean la Fase 4)
+
+- Prueba del fallo tipo B (encoder truncado). En Windows, `truncate` no existe;
+  el equivalente en PowerShell está en `docs/PRUEBA-NIVEL2.md`.
+- Calibración de `VAD_THRESHOLD` con datos reales (`livedub.vadDebug(true)`).
+  Sigue en 0.005, valor puesto a ojo y nunca ajustado con medidas.
+- Vigilar si con frases de 12 s reaparecen repeticiones menores en audio denso.
+
 ## Notas de alcance
 
 - El permiso **`scripting`** está declarado pero todavía no se usa:

@@ -82,11 +82,25 @@ Mueve los pesos fuera (`mv livedub/models/whisper-tiny/onnx /tmp/`), recarga la 
 
 ## 6. Fallo — variante B (`.onnx` truncado a la mitad)
 
+Linux / macOS:
+
 ```bash
 cd livedub/models/whisper-tiny/onnx
 cp encoder_model_quantized.onnx /tmp/encoder.bak            # copia de seguridad
 truncate -s 50% encoder_model_quantized.onnx                # lo parte por la mitad
 # restaurar después:  cp /tmp/encoder.bak encoder_model_quantized.onnx
+```
+
+Windows (PowerShell) — `truncate` no existe, se corta a mano:
+
+```powershell
+cd livedub\models\whisper-tiny\onnx
+Copy-Item encoder_model_quantized.onnx $env:TEMP\encoder.bak   # copia de seguridad
+$f = Get-Item encoder_model_quantized.onnx
+$s = [System.IO.File]::Open($f.FullName,'Open','ReadWrite')
+$s.SetLength([int64]($f.Length / 2)); $s.Close()               # lo parte por la mitad
+# restaurar después:
+# Copy-Item $env:TEMP\encoder.bak encoder_model_quantized.onnx -Force
 ```
 
 - Mensaje exacto en la consola del offscreen:

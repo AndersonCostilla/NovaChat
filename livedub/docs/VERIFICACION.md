@@ -65,16 +65,30 @@ fallaba en vez de averiguar el motivo exacto, porque no hay forma de depurarlo
 sin Chrome. Si tras la corrección volviera a aparecer algo parecido, el
 `console.warn` nuevo dará el mensaje de error real.
 
-## Fase 3 — Nivel 2 (PENDIENTE, humano)
+## Fase 3 — Nivel 2: VERIFICADO POR HUMANO EN CHROME REAL
 
-1. Subtítulo tras cada frase + **latencia real medida** (no estimada).
-2. Cerrar/reabrir el popup sin perder subtítulos (`storage.session`).
-3. DevTools en *Offline*: la transcripción sigue funcionando.
-4. Pesos ausentes o corruptos: la extensión no se rompe.
+Pruebas ejecutadas por el usuario. Entorno: Chrome en Windows 10/11,
+**Intel Core i5-12400** (6 núcleos / 12 hilos), vídeos de YouTube con voz en
+inglés y habla continua.
+
+| Criterio | Resultado | Evidencia |
+|---|---|---|
+| Carga del modelo | ✅ | `livedub.estado()` devolvió `modelo: "listo"`. Tiempo exacto no cronometrado; subjetivamente rápido (segundos, no minutos) |
+| Latencia por frase | ✅ | **1.9 / 1.9 / 2.1 / 2.8 / 3.3 / 3.6 / 4.6 s**, escalando con la duración del audio |
+| Persistencia de subtítulos (Bug 1) | ✅ | Cerrar y reabrir el popup conserva el historial |
+| Badge del modelo (Bug 2) | ✅ | «Transcribiendo…» en azul durante la inferencia, «Modelo listo» al terminar |
+| **Offline** | ✅ | DevTools → *Sin conexión*: **cero peticiones** en la pestaña Red y la transcripción sigue funcionando |
+| Fallo A: `onnx/` ausente | ✅ | `Unable to load from local path "...encoder_model_quantized.onnx": "TypeError: Failed to fetch"`, badge «Modelo no disponible», **sin excepción no capturada**; captura + medidor + VAD siguen vivos |
+| Fallo B: encoder truncado | ⬜ | No probado (el fallo A ya demostró degradación robusta) |
+| Fases 1 y 2, sin regresiones | ✅ | Captura, doble AudioContext, medidor y persistencia de estado estables durante toda la sesión |
+| Corte forzado a ~12 s | ✅ | Desaparece la alucinación repetitiva; transcripciones coherentes |
+
+**Fase 3 CERRADA** con el fallo B como único hueco conocido del checklist.
 
 ## Fases 1 y 2 — estado
 
-También **PENDIENTES de verificación humana en Chrome**. Lo ejecutado fue:
-`node --check`, validación del manifest y una simulación en Node de la máquina de
+**VERIFICADAS de paso durante la sesión de Nivel 2 de la Fase 3**: captura,
+doble AudioContext, medidor, persistencia de estado y cortes de frase razonables,
+sin regresiones. Antes de eso, lo ejecutado había sido sólo: `node --check`, validación del manifest y una simulación en Node de la máquina de
 estados del VAD con una secuencia sintética (frases de 2.048 s y 2.816 s, estado
 limpio tras cada corte). El audio real nunca se ha reproducido aquí.

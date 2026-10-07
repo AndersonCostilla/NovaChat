@@ -2,8 +2,10 @@
 
 Extensión de Chrome (Manifest V3) que captura el audio de la pestaña para doblarlo en vivo.
 
-**Estado actual:** Fase 3 de 6 — captura de la pestaña, segmentación por VAD y
-transcripción local con Whisper (WASM, sin red) mostrada como subtítulos en el popup.
+**Estado actual:** Fase 3 de 6 **cerrada y verificada en Chrome real** — captura de
+la pestaña, segmentación por VAD y transcripción local con Whisper (WASM, sin red,
+cero peticiones confirmadas en modo offline) mostrada como subtítulos en el popup.
+Latencia medida: 1.9-4.6 s por frase en un Intel i5-12400.
 Sin traducción ni TTS todavía. Los pesos del modelo **no están en el repositorio**:
 se descargan con `bash livedub/models/descargar-modelo.sh` (ver `livedub/models/README.md`).
 
