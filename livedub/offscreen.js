@@ -21,7 +21,7 @@
 // El analyser cuelga de la FUENTE, no de gainOriginal: así el medidor seguirá
 // mostrando el nivel real aunque el ducking baje gainOriginal.
 
-import { MSG, TARGET, CLAVE_IDIOMAS, ESTADO_MODELO_UI, MODULO } from './messages.js';
+import { MSG, TARGET, ESTADO_MODELO_UI, MODULO } from './messages.js';
 import { crearTranscriptor } from './transcriptor.js';
 import { crearTraductor } from './traductor.js';
 import { detectarIdioma, NOMBRE_IDIOMA } from './detector-idioma.js';
@@ -64,7 +64,10 @@ let sumideroMudo = null;
 // Transcripción (Fase 3) y traducción (Fase 4).
 let transcriptor = null;
 let traductor = null;
-let idiomaOrigen = 'auto'; // se lee de chrome.storage.local (preferencias del popup)
+// Preferencia del popup. OJO: el documento offscreen SÓLO tiene acceso a
+// chrome.runtime; chrome.storage es undefined aquí. Por eso se pide por
+// mensaje al service worker y él avisa de los cambios (SETTINGS_CHANGED).
+let idiomaOrigen = 'auto';
 
 /* ------------------------ Estado del VAD --------------------------- */
 let isSpeaking = false;
@@ -316,25 +319,24 @@ function montarTraductor() {
 /* Regla de idioma (Fase 4: sólo inglés → español)                     */
 /* ------------------------------------------------------------------ */
 
+// Se lo preguntamos al service worker: aquí no hay chrome.storage.
 async function leerIdiomaOrigen() {
-  try {
-    const datos = await chrome.storage.local.get(CLAVE_IDIOMAS);
-    idiomaOrigen = datos?.[CLAVE_IDIOMAS]?.origen || 'auto';
-  } catch (_) {
-    idiomaOrigen = 'auto';
-  }
+  const respuesta = await pedirAlServiceWorker(
+    { type: MSG.GET_SETTINGS },
+    'las preferencias de idioma'
+  );
+  idiomaOrigen = respuesta?.idiomas?.origen || 'auto';
   return idiomaOrigen;
 }
 
-// Si el usuario cambia el idioma origen con la captura en marcha, se aplica a
-// la SIGUIENTE frase: no hace falta Detener e Iniciar.
-chrome.storage.onChanged.addListener((cambios, area) => {
-  if (area !== 'local' || !cambios[CLAVE_IDIOMAS]) return;
-  const nuevo = cambios[CLAVE_IDIOMAS].newValue?.origen || 'auto';
+// El service worker avisa cuando el usuario cambia el idioma en el popup: se
+// aplica a la SIGUIENTE frase, sin necesidad de Detener e Iniciar.
+function aplicarIdiomas(idiomas) {
+  const nuevo = idiomas?.origen || 'auto';
   if (nuevo === idiomaOrigen) return;
   idiomaOrigen = nuevo;
   console.log(`[LiveDub] Idioma origen cambiado a "${idiomaOrigen}" (afecta a la próxima frase).`);
-});
+}
 
 // Decide si una transcripción se traduce. Devuelve { traducir, aviso }.
 function decidirTraduccion(texto) {
@@ -578,6 +580,10 @@ chrome.runtime.onMessage.addListener((mensaje, _remitente, responder) => {
 
     case MSG.SET_GAIN:
       responder(fijarGanancia(mensaje.value));
+      return false;
+
+    case MSG.SETTINGS_CHANGED:
+      aplicarIdiomas(mensaje.idiomas);
       return false;
 
     default:

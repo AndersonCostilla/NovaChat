@@ -105,6 +105,22 @@ Ajustes añadidos al cerrar, a partir de los hallazgos del usuario:
   Sigue en 0.005, valor puesto a ojo y nunca ajustado con medidas.
 - Vigilar si con frases de 12 s reaparecen repeticiones menores en audio denso.
 
+## Fase 4 — bug corregido tras la primera prueba en Chrome
+
+- **`chrome.storage` NO existe en el documento offscreen.** Sólo hay
+  `chrome.runtime`. Un listener `chrome.storage.onChanged` añadido en el
+  offscreen reventaba al cargar y **rompía la captura entera**
+  (`Cannot read properties of undefined (reading 'onChanged')`).
+  Es exactamente la misma restricción que causó el Bug 1 de la Fase 3, que
+  entonces quedó sin diagnosticar porque un `try/catch` mudo lo escondía.
+- **Corrección:** las preferencias de idioma también pasan por el service
+  worker: `GET_SETTINGS` (offscreen → SW) para leerlas, y `SETTINGS_CHANGED`
+  (SW → offscreen) cuando el usuario las cambia. El offscreen vuelve a tocar
+  únicamente `chrome.runtime`.
+- **Regla permanente del proyecto:** desde el documento offscreen y desde los
+  workers, **sólo `chrome.runtime`**. Cualquier otra API va a través del service
+  worker. Vigilado por `tests/test-offscreen-apis.mjs`.
+
 ## Fase 4 — traducción inglés → español
 
 - **Estado:** código completo, **Nivel 1 verificado** (node --check, manifest,

@@ -16,7 +16,10 @@ globalThis.chrome = {
         const r = {}; for (const k of ks) if (almacen.has(k)) r[k] = almacen.get(k); return r;
       },
       set: async (obj) => { for (const [k, v] of Object.entries(obj)) almacen.set(k, v); }
-    }
+    },
+    local: { get: async () => ({}) },
+    // El service worker SÍ tiene storage.onChanged (el offscreen no).
+    onChanged: { addListener: () => {} }
   },
   tabs: { get: async () => ({ url: '' }), onRemoved: { addListener() {} } },
   offscreen: { createDocument: async () => {}, closeDocument: async () => {} },

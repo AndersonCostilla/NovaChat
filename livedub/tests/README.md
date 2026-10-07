@@ -1,11 +1,18 @@
 # Pruebas automáticas (Node, sin navegador)
 
-Se ejecutan con Node a secas, sin dependencias ni paso de build:
+Todas de golpe:
+
+```bash
+bash livedub/tests/ejecutar-todo.sh
+```
+
+O una a una, con Node a secas, sin dependencias ni paso de build:
 
 ```bash
 node livedub/tests/test-subtitulos.mjs   # persistencia de subtítulos (Bug 1)
 node livedub/tests/test-vad-corte.mjs    # corte forzado de frases largas
 node livedub/tests/test-traduccion.mjs   # traducción: heurística, cola y persistencia
+node livedub/tests/test-offscreen-apis.mjs  # APIs de chrome permitidas por contexto
 ```
 
 Cada script termina con código 0 si pasa y 1 si falla.
@@ -25,6 +32,20 @@ Cada script termina con código 0 si pasa y 1 si falla.
   (incluida la caída del modelo: ninguna promesa se queda colgada), y la
   persistencia en el `background.js` **real** de un subtítulo con original +
   traducción y de los dos estados de módulo por separado.
+
+- **`test-offscreen-apis.mjs`** es la prueba de regresión del bug «API de
+  contexto equivocado». Hace dos cosas: un análisis estático (que `offscreen.js`,
+  `transcriptor.js` y `traductor.js` sólo nombren `chrome.runtime`, y que los
+  workers no usen ninguna API de chrome) y una carga real de `offscreen.js` con
+  un `chrome` **restringido** —sólo `runtime`—, igual que el del offscreen real.
+  Verificada reintroduciendo el bug a propósito: falla con el mismo mensaje que
+  dio Chrome (`Cannot read properties of undefined (reading 'onChanged')`).
+
+> ⚠️ **Limitación conocida de las otras pruebas:** su `chrome` simulado es
+> «generoso» (expone `storage`, `tabs`, `offscreen`) porque están pensadas para
+> el service worker, que sí tiene esas APIs. Por eso NO detectaban este tipo de
+> fallo. Si añades código al offscreen o a un worker, ejecuta
+> `test-offscreen-apis.mjs`.
 
 Ninguna prueba Chrome, Web Audio, WASM ni el modelo: eso sólo se
 valida a mano (ver `docs/PRUEBA-NIVEL2.md`).

@@ -59,11 +59,16 @@ excepción con *stack trace* no capturada, eso sí es un bug: repórtala.
 | 12 | El badge pasa a «Transcribiendo…» y vuelve a «Modelo listo» en Chrome | **PENDIENTE (humano)** | — |
 | 13 | Cerrar/reabrir el popup conserva los subtítulos en Chrome | **PENDIENTE (humano)** | — |
 
-La causa raíz del Bug 1 (por qué el offscreen no conseguía escribir en
-`storage.session`) **no está diagnosticada al 100 %**: se eliminó el camino que
-fallaba en vez de averiguar el motivo exacto, porque no hay forma de depurarlo
-sin Chrome. Si tras la corrección volviera a aparecer algo parecido, el
-`console.warn` nuevo dará el mensaje de error real.
+**Causa raíz del Bug 1: YA DIAGNOSTICADA** (gracias al fallo de la Fase 4).
+Un documento offscreen sólo tiene acceso a **`chrome.runtime`**; el resto de
+APIs de extensión (`chrome.storage`, `chrome.tabs`…) llegan como `undefined`.
+Por eso las escrituras a `storage.session` desde el offscreen nunca cuajaban: la
+llamada reventaba y el `try/catch` mudo se lo tragaba. En la Fase 4 el mismo
+error reapareció sin `try/catch` y se vio limpio en Chrome:
+`Uncaught TypeError: Cannot read properties of undefined (reading 'onChanged')`.
+
+Desde entonces hay una prueba que lo impide volver a colar:
+`tests/test-offscreen-apis.mjs`.
 
 ## Fase 3 — Nivel 2: VERIFICADO POR HUMANO EN CHROME REAL
 
@@ -108,6 +113,7 @@ reales capturados en Chrome):
 | 8 | Persistencia: subtítulo con original + traducción y estados de los dos módulos por separado | EJECUTADO (`background.js` real) | 4/4 |
 | 9 | Los pesos del traductor quedan fuera de Git | EJECUTADO (`git check-ignore` + archivos falsos) | Ignorados |
 | 10 | Traducción real con pesos, en Chrome | **PENDIENTE (humano)** | — |
+| 11 | Ningún archivo del offscreen usa APIs fuera de `chrome.runtime`, y `offscreen.js` carga con el `chrome` restringido real | EJECUTADO (`tests/test-offscreen-apis.mjs`) | 7/7 — verificada reintroduciendo el bug |
 
 **Nivel 1 verificado / Nivel 2 pendiente de pesos + Chrome real.**
 

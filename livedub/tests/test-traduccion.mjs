@@ -91,11 +91,15 @@ globalThis.chrome = {
     sendMessage: async (m) => { if (m.target === 'popup') alPopup.push(m); },
     getContexts: async () => []
   },
-  storage: { session: {
-    get: async (c) => { const ks = Array.isArray(c) ? c : [c]; const r = {};
-      for (const k of ks) if (almacen.has(k)) r[k] = almacen.get(k); return r; },
-    set: async (o) => { for (const [k, v] of Object.entries(o)) almacen.set(k, v); }
-  } },
+  storage: {
+    session: {
+      get: async (c) => { const ks = Array.isArray(c) ? c : [c]; const r = {};
+        for (const k of ks) if (almacen.has(k)) r[k] = almacen.get(k); return r; },
+      set: async (o) => { for (const [k, v] of Object.entries(o)) almacen.set(k, v); }
+    },
+    local: { get: async () => ({}) },
+    onChanged: { addListener: () => {} } // sólo existe en el service worker
+  },
   tabs: { get: async () => ({ url: '' }), onRemoved: { addListener() {} } },
   offscreen: { createDocument: async () => {}, closeDocument: async () => {} },
   tabCapture: { getMediaStreamId: async () => 'x' }

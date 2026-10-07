@@ -16,6 +16,7 @@ import {
   ERROR,
   CLAVE_ESTADO_SESION,
   ESTADO_SESION,
+  CLAVE_IDIOMAS,
   CLAVE_SUBTITULOS,
   CLAVE_MODELO,
   CLAVE_TRADUCTOR,
@@ -113,6 +114,36 @@ async function leerPanel() {
     traductor: datos?.[CLAVE_TRADUCTOR] || { estado: ESTADO_MODELO_UI.INACTIVO, detalle: '' }
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* Preferencias de idioma (el offscreen no puede leer chrome.storage)  */
+/* ------------------------------------------------------------------ */
+// Un documento offscreen sólo tiene acceso a chrome.runtime; cualquier otra
+// API de extensión llega como undefined. Por eso el service worker hace de
+// intermediario también para las preferencias.
+
+async function leerIdiomas() {
+  const datos = await chrome.storage.local.get(CLAVE_IDIOMAS);
+  const guardado = datos?.[CLAVE_IDIOMAS] || {};
+  return { origen: guardado.origen || 'auto', destino: guardado.destino || 'es' };
+}
+
+// Si el usuario cambia el idioma en el popup, se lo contamos al offscreen para
+// que lo aplique en caliente (afecta a la siguiente frase).
+chrome.storage.onChanged.addListener((cambios, area) => {
+  if (area !== 'local' || !cambios[CLAVE_IDIOMAS]) return;
+
+  const nuevo = cambios[CLAVE_IDIOMAS].newValue || {};
+  chrome.runtime
+    .sendMessage({
+      type: MSG.SETTINGS_CHANGED,
+      target: TARGET.OFFSCREEN,
+      idiomas: { origen: nuevo.origen || 'auto', destino: nuevo.destino || 'es' }
+    })
+    .catch(() => {
+      /* no hay offscreen abierto: no es un error */
+    });
+});
 
 /* ------------------------------------------------------------------ */
 /* Utilidades                                                          */
@@ -340,6 +371,12 @@ chrome.runtime.onMessage.addListener((mensaje, _remitente, responder) => {
 
     case MSG.GET_SUBTITLES:
       leerPanel().then(responder);
+      return true;
+
+    case MSG.GET_SETTINGS:
+      leerIdiomas()
+        .then((idiomas) => responder({ ok: true, idiomas }))
+        .catch((error) => responder({ ok: false, error: String(error?.message || error) }));
       return true;
 
     default:

@@ -143,6 +143,19 @@ Requiere **Chrome 116 o superior** (por `chrome.runtime.getContexts`).
 3. El estado pasa a *Capturando* y la barra de nivel se mueve con el audio.
 4. Pulsa **Detener** para liberar todo.
 
+## Regla de arquitectura: qué API puede usar cada contexto
+
+| Contexto | APIs de extensión disponibles |
+|---|---|
+| `background.js` (service worker) | Todas: `storage`, `tabs`, `offscreen`, `tabCapture`… |
+| `offscreen.js` + `transcriptor.js` + `traductor.js` | **Sólo `chrome.runtime`** |
+| Workers (`*-worker.js`, `vad-processor.js`) | **Ninguna** |
+
+El documento offscreen recibe `undefined` en `chrome.storage`, `chrome.tabs`,
+etc. Todo lo que necesite pasa por mensajes al service worker. Esta regla está
+vigilada por `tests/test-offscreen-apis.mjs` y su incumplimiento ya provocó dos
+bugs (Bug 1 de la Fase 3 y la caída de la captura en la Fase 4).
+
 ## Depuración
 
 ### Consola del service worker

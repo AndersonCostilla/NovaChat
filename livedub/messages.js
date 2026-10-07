@@ -24,6 +24,13 @@ export const MSG = {
   // popup -> background
   GET_SUBTITLES: 'GET_SUBTITLES',         // historial + estado del modelo al abrir
 
+  // offscreen -> background: el offscreen NO puede usar chrome.storage,
+  // así que pide las preferencias por mensaje.
+  GET_SETTINGS: 'GET_SETTINGS',
+
+  // background -> offscreen: aviso de que el usuario cambió una preferencia.
+  SETTINGS_CHANGED: 'SETTINGS_CHANGED',
+
   // background -> popup
   SUBTITLE: 'SUBTITLE',         // nueva transcripción lista
   MODEL_STATUS: 'MODEL_STATUS', // estado del modelo local
