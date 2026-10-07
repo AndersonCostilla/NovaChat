@@ -20,7 +20,8 @@ const ARCHIVOS_WORKER = [
   '../transcriptor-worker.js',
   '../traductor-worker.js',
   '../vad-processor.js',
-  '../segmentador.js' // se carga dentro del worker de traducción
+  '../segmentador.js', // se carga dentro del worker de traducción
+  '../terminos-protegidos.js' // idem
 ];
 
 function apisUsadas(ruta) {

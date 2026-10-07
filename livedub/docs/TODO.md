@@ -147,6 +147,46 @@ Descartadas con evidencia: la tarea `translation` **sí** está registrada en el
 bundle; las claves de estado de transcripción y traducción son distintas (no hay
 carrera entre módulos); el camino de publicación de estado no traga errores.
 
+## PENDIENTE (Fase 2/3, fuera del alcance de la Fase 4) — el VAD corta a mitad de cláusula
+
+Detectado al analizar la segunda tanda de pruebas de traducción, pero **no es
+un problema de traducción**: cuando una frase llega al límite de duración
+(`MAX_FRASE_CHUNKS = 47` en `offscreen.js`, unos 12 s), el corte cae donde cae.
+
+Caso medido: `"high quality mixed Reality for"` → `"alta calidad"`. Se comprobó
+que **no es el segmentador** (devuelve 1 trozo con el texto íntegro): es el
+modelo, que ante un fragmento acabado en preposición suelta no produce una
+traducción completa. El daño es doble, porque la transcripción también queda
+partida.
+
+Posible mejora para una fase futura: cerrar la frase en una **pausa prosódica**
+cercana al límite en lugar de por reloj fijo, usando la energía que el VAD ya
+calcula. NO tocar sin pedirlo: afecta a la máquina de estados del VAD, que está
+confirmada funcionando en Chrome.
+
+Sin acción, por diseño: una transcripción errónea de Whisper se traduce
+fielmente y el resultado no tiene sentido en español. Basura entra, basura
+sale; el traductor hace lo correcto. Se arregla mejorando la transcripción, no
+la traducción.
+
+## Fase 4 — nombres propios mal traducidos
+
+Caso real: `"the llama models"` → `"los modelos de las 'Joyas'"`. OPUS-MT en→es
+se entrenó con corpus de ~2020: no conoce Llama, y "llama" es además una
+palabra española corriente.
+
+Descartado con evidencia: subir `num_beams` **no** lo arregla. La búsqueda en
+haz reordena candidatos con las mismas probabilidades del modelo; no añade
+conocimiento que el modelo no tiene. Además, en `transformers.min.js` los haces
+se recorren en serie (`for (let r of _) { await this.runBeam(r) }`), así que el
+coste crece de forma aproximadamente lineal con `num_beams`: se pagaría ~2× de
+latencia por una mejora incierta.
+
+Solución aplicada: `terminos-protegidos.js`. Sustituye cada término por un
+marcador antes de traducir y lo repone después. Coste de latencia: cero.
+**Para añadir un término nuevo basta con una línea en la lista `TERMINOS` de
+ese archivo.**
+
 ## Fase 4 — traducciones truncadas (9 muestras reales de Anderson)
 
 Síntoma: frases largas traducidas a una sola oración. Ejemplo medido: entrada

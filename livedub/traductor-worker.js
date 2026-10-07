@@ -12,6 +12,7 @@
 
 import { pipeline, env } from './libs/transformers/transformers.min.js';
 import { trocearEnOraciones, unirTraducciones } from './segmentador.js';
+import { proteger, restaurar, limpiarMarcadoresSueltos } from './terminos-protegidos.js';
 
 const ENTRADA = { INIT: 'INIT', TRADUCIR: 'TRADUCIR' };
 const SALIDA = {
@@ -190,17 +191,40 @@ async function traducir({ id, texto }) {
   const palabrasMasLargo = Math.max(...trozos.map((t) => t.split(/\s+/).length));
   const maxTokens = Math.min(TOKENS_MAXIMOS, Math.max(TOKENS_MINIMOS, palabrasMasLargo * 4));
 
-  console.log(`${LOG} frase #${id}: ${trozos.length} trozo(s), máx ${palabrasMasLargo} palabras`);
+  // Nombres propios y términos técnicos fuera del alcance del modelo: se
+  // cambian por marcadores antes de traducir y se reponen después.
+  const protegidos = trozos.map((trozo) => proteger(trozo));
+  const entradas = protegidos.map((p) => p.texto);
+  const totalMarcas = protegidos.reduce((n, p) => n + p.marcas.length, 0);
+
+  console.log(
+    `${LOG} frase #${id}: ${trozos.length} trozo(s), máx ${palabrasMasLargo} palabras` +
+      (totalMarcas ? `, ${totalMarcas} término(s) protegido(s)` : '')
+  );
 
   // El pipeline acepta un array y lo procesa como LOTE en una sola llamada a
   // generate(), que es bastante más barato que una llamada por oración.
-  const salida = await modelo(trozos, {
+  const salida = await modelo(entradas, {
     max_new_tokens: maxTokens,
     num_beams: NUM_BEAMS
   });
 
   const lista = Array.isArray(salida) ? salida : [salida];
-  const parciales = lista.map((item) => item?.translation_text ?? '');
+  const perdidas = [];
+  const parciales = lista.map((item, i) => {
+    const crudo = item?.translation_text ?? '';
+    const { texto: repuesto, perdidas: sinRestaurar } = restaurar(crudo, protegidos[i]?.marcas ?? []);
+    perdidas.push(...sinRestaurar);
+    // Por si algún marcador sobrevivió deformado: nunca se le enseña al usuario.
+    return limpiarMarcadoresSueltos(repuesto);
+  });
+
+  if (perdidas.length) {
+    // Si esto aparece mucho, el modelo se está comiendo los marcadores y hay
+    // que cambiar PREFIJO_MARCA en terminos-protegidos.js.
+    console.warn(`${LOG} frase #${id}: el modelo perdió ${perdidas.length} marcador(es): ${perdidas.join(', ')}`);
+  }
+
   const traduccion = unirTraducciones(parciales);
 
   const duracionMs = Math.round(performance.now() - inicio);
@@ -219,6 +243,7 @@ async function traducir({ id, texto }) {
     id,
     traduccion,
     trozos: trozos.length,
+    terminosProtegidos: totalMarcas,
     duracionMs
   });
 }

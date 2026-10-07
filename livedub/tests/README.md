@@ -15,6 +15,7 @@ node livedub/tests/test-traduccion.mjs   # traducción: heurística, cola y pers
 node livedub/tests/test-offscreen-apis.mjs  # APIs de chrome permitidas por contexto
 node livedub/tests/test-traductor-vigilante.mjs  # límite de tiempo de carga del traductor
 node livedub/tests/test-segmentador.mjs  # troceo en oraciones y truncamiento de OPUS-MT
+node livedub/tests/test-terminos-protegidos.mjs  # nombres propios que no se traducen
 ```
 
 Cada script termina con código 0 si pasa y 1 si falla.
@@ -60,6 +61,13 @@ Cada script termina con código 0 si pasa y 1 si falla.
   tres casos reales que reportó Anderson, más textos de 100+ palabras y texto
   sin puntuación. Comprueba que con troceo no se pierde ninguna oración: en el
   caso 1, 31 caracteres de salida sin trocear frente a 208 con troceo.
+
+- **`test-terminos-protegidos.mjs`** usa un modelo simulado que **comete el
+  error real** (`llama` → `las 'Joyas'`) y comprueba el ciclo entero:
+  sustitución → traducción → restauración. Cubre términos de varias palabras,
+  el modo estricto (`meta` minúscula no se toca, `Meta` sí), marcadores
+  maltratados por el modelo, y el caso en que el marcador desaparece: entonces
+  se informa y **no se inventa** el término.
 
 Ninguna prueba Chrome, Web Audio, WASM ni el modelo: eso sólo se
 valida a mano (ver `docs/PRUEBA-NIVEL2.md`).

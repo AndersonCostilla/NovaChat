@@ -118,7 +118,9 @@ reales capturados en Chrome):
 | 13 | La lista de archivos del modelo traductor coincide con lo que exige la librería | EJECUTADO (lectura de `transformers.min.js`) | `tokenizer.json` era obligatorio y faltaba en el script |
 | 14 | Un texto de varias oraciones se trocea y no se pierde ninguna al traducir | EJECUTADO (`tests/test-segmentador.mjs`) | 24/24, con los 3 casos reales de Anderson |
 | 15 | `max_new_tokens` NO era la causa del truncamiento | EJECUTADO (lectura del bucle de generación) | tope real 257 tokens; salidas truncadas de ~10 |
-| 16 | Latencia real por frase tras el troceo y `num_beams=1` | **PENDIENTE (humano)** | requiere nuevas muestras en Chrome |
+| 16 | Latencia real por frase tras el troceo y `num_beams=1` | VERIFICADO (humano, 2ª tanda) | traducción de 5,0-10,2 s a 0,2-2,5 s |
+| 17 | Los términos protegidos sobreviven al ciclo sustituir → traducir → reponer | EJECUTADO (`tests/test-terminos-protegidos.mjs`) | 24/24, con el caso real `llama` → `Joyas` |
+| 18 | OPUS-MT copia de verdad el marcador `Xk0` sin deformarlo | **PENDIENTE (humano)** | sólo se puede saber en Chrome; hay aviso en consola si falla |
 
 **Nivel 1 verificado / Nivel 2 pendiente de pesos + Chrome real.**
 

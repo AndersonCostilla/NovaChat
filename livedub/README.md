@@ -143,6 +143,24 @@ Requiere **Chrome 116 o superior** (por `chrome.runtime.getContexts`).
 3. El estado pasa a *Capturando* y la barra de nivel se mueve con el audio.
 4. Pulsa **Detener** para liberar todo.
 
+## Términos que no se traducen
+
+OPUS-MT traduce nombres propios que no conoce (`Llama` salía como `"Joyas"`).
+Para evitarlo, `terminos-protegidos.js` los cambia por un marcador antes de
+traducir y los repone después, sin coste de latencia.
+
+**Para añadir un término nuevo**, añade una línea a la lista `TERMINOS` en
+`livedub/terminos-protegidos.js` y ejecuta
+`node livedub/tests/test-terminos-protegidos.mjs`. No hay que tocar nada más.
+
+```js
+{ termino: 'Gemini', estricto: true },  // estricto: sólo si va en mayúscula
+```
+
+Usa `estricto: true` cuando la palabra también exista en minúscula con otro
+sentido (`Meta` la empresa frente a `meta` objetivo); `estricto: false` cuando
+Whisper suela transcribirla en minúscula (`llama`).
+
 ## Regla de arquitectura: qué API puede usar cada contexto
 
 | Contexto | APIs de extensión disponibles |
