@@ -1,5 +1,9 @@
 # Checklist de prueba Nivel 2 — LiveDub Fase 4 (traducción EN → ES)
 
+> **Revisión 2** — actualizada tras los commits `732f940`, `7f0677e`, `c8abf21`
+> y `b176cce`. La revisión 1 describía comportamientos que ya no son ciertos,
+> sobre todo en el bloque 4.
+
 Rellena los huecos mientras pruebas. Al terminar, pégame el archivo entero.
 
 - **Fecha:** ____________________
@@ -10,11 +14,24 @@ Rellena los huecos mientras pruebas. Al terminar, pégame el archivo entero.
 
 ---
 
-## 0. ANTES DE EMPEZAR — cómo funciona el selector de idioma
+## ⚠ Aviso de numeración
 
-**Respuesta a tu pregunta: el selector «Idioma origen» del popup YA existe y YA
-está conectado a esta lógica.** No tienes que usar «Detectar automáticamente» a
-la fuerza. Comportamiento exacto:
+Tu lista de pendientes va **desfasada un número** respecto a esta plantilla.
+Equivalencias, para que no repitas ni te saltes nada:
+
+| Como lo llamaste tú | Bloque real aquí |
+|---|---|
+| «bloque 2 — detección automática» | **Bloque 3** |
+| «bloque 3 — vídeo en otro idioma» | **Bloque 3** (es el mismo) |
+| «bloque 4 — fallo del modelo» | **Bloque 4** ✔ coincide |
+| «bloque 5, 6, 7» | **5, 6, 7** ✔ coinciden |
+
+**Pendiente real: bloques 3, 4, 5, 6 y 7.** Los bloques 0, 1, 2 y 2-bis ya están
+cerrados con tus datos y quedan registrados abajo.
+
+---
+
+## 0. Cómo funciona el selector de idioma — CERRADO
 
 | Selección en el popup | Qué hace Whisper | Qué hace la traducción |
 |---|---|---|
@@ -22,73 +39,41 @@ la fuerza. Comportamiento exacto:
 | **Detectar automáticamente** | Detecta él solo el idioma | Aplica la heurística de `detector-idioma.js`; si el texto no parece inglés, **no traduce** y avisa |
 | Francés, alemán, etc. | Se le fuerza ese idioma | **No traduce** y avisa (esta fase es sólo en→es) |
 
-La selección se guarda en `chrome.storage.local` y, desde este commit, **se
-aplica en caliente**: si la cambias con la captura en marcha, afecta a la
-siguiente frase, sin necesidad de Detener e Iniciar. Lo verás en la consola del
-offscreen: `[LiveDub] Idioma origen cambiado a "en"`.
+Se aplica **en caliente**: si lo cambias con la captura en marcha, afecta a la
+siguiente frase. En la consola del offscreen verás
+`[LiveDub] Idioma origen cambiado a "en" (afecta a la próxima frase).`
 
-**Recomendación para la sesión:** haz el bloque 1 con **«Inglés»** seleccionado
-(aísla la traducción de la heurística) y el bloque 2 con **«Detectar
-automáticamente»** (que es justo lo que pone a prueba la heurística).
+> Cambio respecto a la revisión 1: la preferencia ya **no** la lee el offscreen
+> de `chrome.storage` (allí no existe). La lee el service worker y se la manda
+> por mensaje. El comportamiento visible es el mismo.
 
-## Preparación
+## 1. Carga del traductor — CERRADO ✔
 
-```powershell
-bash livedub/models/descargar-modelo-traductor.sh
-```
+Resultado: el traductor carga y pasa a «listo». Tras corregir el
+`tokenizer.json` ausente y añadir el vigilante de 90 s, no vuelve a quedarse
+colgado en «cargando».
 
-- ¿Terminó con «Traductor completo»? Sí / No
-- Si falló algún archivo, pega aquí el RESUMEN del script:
+## 2. Latencias — CERRADO ✔ (11 muestras)
 
-```
-```
+| Tanda | Traducción | Nota |
+|---|---|---|
+| 1ª (`num_beams=4`, sin troceo) | 5,0 – 10,2 s | perdía oraciones enteras |
+| 2ª (`num_beams=1` + troceo + lote) | 0,2 – 2,5 s | sin pérdida de oraciones |
+| 3ª (+ términos protegidos) | 0,4 – 2,3 s | sin coste añadido |
 
-- ¿Hubo archivos marcados como «opcional, se omite»? ¿Cuáles? ____________________
+## 2-bis. Términos protegidos — CERRADO ✔
 
-Después: `chrome://extensions` → LiveDub → **Recargar (↻)** → abrir el vídeo → **Iniciar**.
+`"So the llama models…"` → `"Así que los modelos Llama…"`. Sin marcadores
+sueltos, sin pérdida del término, sin coste de latencia.
 
 ---
 
-## 1. Carga del traductor
+# PENDIENTE A PARTIR DE AQUÍ
 
-El popup tiene ahora **dos insignias** en la cabecera del panel: la de
-transcripción (arriba) y la de traducción (abajo).
+## 3. Criterio 2 — vídeo en idioma NO inglés + heurística
 
-| Dato | Valor |
-|---|---|
-| Hora del clic en «Iniciar» | ____________ |
-| Hora en que la insignia de abajo pasó a «Traductor listo» | ____________ |
-| **Total** | **______ segundos** |
-
-- ¿Las dos insignias cargaron en paralelo o una esperó a la otra? ____________________
-- ¿Se oía el audio con normalidad durante las dos cargas? Sí / No
-- `livedub.estado()` en la consola del offscreen — pega la salida:
-
-```
-```
-
-## 2. Latencias separadas (4-5 muestras) — vídeo en INGLÉS
-
-Con **«Inglés»** seleccionado como idioma origen. Cada subtítulo muestra en su
-cabecera `hora · idioma · transcripción + traducción = total`.
-
-| # | Duración aprox. de la frase | Transcripción | Traducción | Total | ¿Traducción correcta? |
-|---|---|---|---|---|---|
-| 1 | ______ s | ______ s | ______ s | ______ s | Sí / Aceptable / No |
-| 2 | ______ s | ______ s | ______ s | ______ s | Sí / Aceptable / No |
-| 3 | ______ s | ______ s | ______ s | ______ s | Sí / Aceptable / No |
-| 4 | ______ s | ______ s | ______ s | ______ s | Sí / Aceptable / No |
-| 5 | ______ s | ______ s | ______ s | ______ s | Sí / Aceptable / No |
-
-- ¿La traducción añade décimas de segundo o segundos completos? ____________________
-- ¿Se ven las dos líneas `EN:` / `ES:` claramente diferenciadas? Sí / No
-- ¿La insignia de abajo parpadea a «Traduciendo…» durante la inferencia? Sí / No
-- ¿El audio original se entrecorta ahora que hay dos modelos trabajando? Sí / No
-
-## 3. Criterio 2 — vídeo en idioma NO inglés
-
-Pon un vídeo en francés (o alemán, español, italiano…) y selecciona
-**«Detectar automáticamente»** en el popup.
+Pon un vídeo en francés (o alemán, italiano…) y selecciona **«Detectar
+automáticamente»**.
 
 | # | Texto transcrito (copia 1 frase) | ¿Tradujo? | ¿Debía traducir? |
 |---|---|---|---|
@@ -102,27 +87,48 @@ Pon un vídeo en francés (o alemán, español, italiano…) y selecciona
 ```
 
 - ¿El aviso se entiende sin ser técnico? Sí / No — ¿cómo lo redactarías tú? ____________________
-- ¿Acertó la heurística con el idioma? (dice «francés», «alemán»…) Sí / No / Dijo «idioma no identificado»
+- ¿Acertó la heurística con el idioma? Sí / No / Dijo «idioma no identificado»
 - ¿Hubo algún **falso positivo** (tradujo algo que no era inglés)? Sí / No
   - Si sí, pega el texto: ____________________
-- **Prueba cruzada:** con ese mismo vídeo, cambia el selector a **«Inglés»**.
-  ¿Ahora intenta traducir (y sale mal)? Sí / No
+
+**Prueba cruzada** — con ese mismo vídeo, cambia el selector a **«Inglés»**:
+
+- ¿Ahora intenta traducir (y sale mal)? Sí / No
   *(Debe intentarlo: con selección manual tu elección manda sobre la heurística.
-  Sirve para confirmar que la heurística solo actúa en modo automático.)*
+  Confirma que la heurística solo actúa en modo automático.)*
+- ¿El cambio surtió efecto **sin** Detener/Iniciar? Sí / No
+- ¿Apareció `[LiveDub] Idioma origen cambiado a "en"` en la consola? Sí / No
 
-## 4. Independencia de los dos módulos (insignias)
+## 4. Independencia de los dos módulos — ⚠ EXPECTATIVAS NUEVAS
 
-**Cómo forzar el fallo del traductor** — sí, igual que hicimos con Whisper en
-Fase 3, pero sobre la carpeta `opus-mt-en-es`. Con la extensión parada:
+> **Esto cambió desde la revisión 1.** El worker ahora comprueba los archivos
+> con `fetch()` **antes** de arrancar el pipeline. Por eso cada variante falla
+> de una forma distinta, y conviene saber cuál esperar: si ves otra cosa,
+> es un hallazgo de verdad.
 
-**Variante A — pesos ausentes (PowerShell):**
+Con la extensión parada. **Prueba las tres variantes**, restaurando entre una y otra.
+
+### Variante A — carpeta `onnx` ausente
 
 ```powershell
 Move-Item livedub\models\opus-mt-en-es\onnx $env:TEMP\onnx-traductor-backup
 # restaurar:  Move-Item $env:TEMP\onnx-traductor-backup livedub\models\opus-mt-en-es\onnx
 ```
 
-**Variante B — encoder truncado (PowerShell):**
+**Esperado:** el pre-chequeo lo caza en **segundos**, no en 90 s. En consola:
+`✘ onnx/encoder_model_quantized.onnx → HTTP 404`.
+
+### Variante A2 — falta `tokenizer.json` (el bug real de esta sesión)
+
+```powershell
+Move-Item livedub\models\opus-mt-en-es\tokenizer.json $env:TEMP\tokenizer-backup.json
+# restaurar:  Move-Item $env:TEMP\tokenizer-backup.json livedub\models\opus-mt-en-es\tokenizer.json
+```
+
+**Esperado:** `✘ tokenizer.json → HTTP 404` y error inmediato. Esta variante es
+la que valida la corrección: antes dejaba el traductor colgado en «cargando».
+
+### Variante B — encoder truncado
 
 ```powershell
 cd livedub\models\opus-mt-en-es\onnx
@@ -133,27 +139,35 @@ $s.SetLength([int64]($f.Length / 2)); $s.Close()
 # restaurar:  Copy-Item $env:TEMP\enc-trad.bak encoder_model_quantized.onnx -Force
 ```
 
-Recarga la extensión y pulsa Iniciar con un vídeo en inglés.
+**Esperado (y distinto a propósito):** el pre-chequeo **pasa en verde**, porque
+sólo mira si el archivo responde `HTTP 200` y un archivo truncado existe. El
+fallo salta después, dentro de ONNX, con un error de *protobuf*, y la insignia
+debe decir «corrupto o incompleto».
 
-| Comprobación | Variante A (ausente) | Variante B (truncado) |
-|---|---|---|
-| Insignia de **transcripción** | ____________ | ____________ |
-| Insignia de **traducción** | ____________ | ____________ |
-| ¿Siguen apareciendo subtítulos en inglés? | Sí / No | Sí / No |
-| ¿Medidor y captura siguen bien? | Sí / No | Sí / No |
-| Aviso en cada subtítulo (cópialo) | | |
-| Mensaje en la consola del offscreen | | |
-| ¿Excepción con *stack trace* NO capturada? | Sí / No | Sí / No |
+### Resultados
 
-*(Recordatorio de Fase 3: las líneas rojas de `404` / `ERR_FILE_NOT_FOUND` son
-ruido esperado del navegador, no cuentan como excepción sin capturar.)*
+| Comprobación | A (ausente) | A2 (sin tokenizer) | B (truncado) |
+|---|---|---|---|
+| Insignia de **transcripción** | ______ | ______ | ______ |
+| Insignia de **traducción** | ______ | ______ | ______ |
+| ¿Cuánto tardó en dar el error? | ____ s | ____ s | ____ s |
+| Línea `✘ …` de la consola (cópiala) | | | |
+| ¿Siguen apareciendo subtítulos en inglés? | Sí/No | Sí/No | Sí/No |
+| ¿Medidor y captura siguen bien? | Sí/No | Sí/No | Sí/No |
+| Aviso en cada subtítulo (cópialo) | | | |
+| ¿Excepción con *stack trace* NO capturada? | Sí/No | Sí/No | Sí/No |
 
-- Pasa el ratón por encima de la insignia de traducción: ¿el tooltip explica la
-  causa concreta (falta / corrupto)? ____________________
-- **Lo importante:** ¿la transcripción funcionó con normalidad, completamente
-  ajena al fallo del traductor? **Sí / No**
+- ¿Apareció en algún caso **`Tiempo agotado al cargar el traductor`** (a los 90 s)?
+  Sí / No → **Debería ser NO en las tres.** Si sale que sí, es un modo de fallo
+  nuevo que no habíamos visto: anótalo.
+- Tooltip de la insignia de traducción: ¿explica la causa concreta? ____________________
+- **Lo importante:** ¿la transcripción funcionó con normalidad, ajena al fallo
+  del traductor? **Sí / No**
 
-Restaura los pesos antes de seguir.
+*(Las líneas rojas de `404` / `ERR_FILE_NOT_FOUND` son ruido esperado del
+navegador, no cuentan como excepción sin capturar.)*
+
+**Restaura los tres archivos antes de seguir.**
 
 ## 5. Persistencia del par completo (original + traducción)
 
@@ -164,17 +178,20 @@ Con sesión activa y varios subtítulos bilingües en pantalla:
 - ¿Se conservan los tiempos (`2.1 s + 0.4 s = 2.5 s`) en la cabecera? Sí / No
 - ¿Se conservan los avisos de los subtítulos sin traducción? Sí / No
 - ¿Las dos insignias muestran su estado real al reabrir (no «inactivo»)? Sí / No
-- Opcional, en la consola del **service worker**:
+- En la consola del **service worker**:
 
 ```js
 chrome.storage.session.get(null, (d) => console.log(JSON.stringify(d, null, 2)))
 ```
 
-Pega el resultado (debe haber `livedub.subtitulos` con `traduccion`, más
-`livedub.modelo` y `livedub.traductor` por separado):
+Pega el resultado. Debe haber `livedub.subtitulos` con `traduccion`, más
+`livedub.modelo` y `livedub.traductor` **en claves separadas**:
 
 ```
 ```
+
+- ¿Aparecen los campos nuevos `trozos` y `terminosProtegidos` en algún subtítulo? Sí / No
+  *(Son informativos; que falten no es un fallo, pero confirma que llegan.)*
 
 ## 6. Offline
 
@@ -184,6 +201,7 @@ DevTools (en la pestaña capturada) → *Network* → **Offline**.
 - ¿Sigue **traduciendo**? **Sí / No**
 - ¿Aparece alguna petición de red en la pestaña *Network* del offscreen? Sí / No
   - Si sí, pega la URL: ____________________
+  - *(Las peticiones a `chrome-extension://` son locales y NO cuentan.)*
 
 ## 7. Sin regresiones en lo ya cerrado (Fases 1-3)
 
@@ -195,6 +213,14 @@ DevTools (en la pestaña capturada) → *Network* → **Offline**.
 | Detener y volver a Iniciar sin recargar la extensión | Sí / No |
 | Los cortes de frase siguen siendo razonables (máx. ~12 s) | Sí / No |
 | Tras ~1 min sin tocar nada, reabrir el popup sigue diciendo «Capturando» | Sí / No |
+| `livedub.estado()` devuelve `modelo` y `traductor` por separado | Sí / No |
+
+En la consola del **popup** (clic derecho sobre el popup → Inspeccionar), ahora
+hay avisos que antes se callaban:
+
+- ¿Aparece algún `[LiveDub] GET_SUBTITLES falló…` o `[LiveDub] GET_STATE falló…`? Sí / No
+  *(Lo normal es que NO. Si aparecen, el popup está tirando del plan B y
+  queremos saberlo — antes esto pasaba en silencio.)*
 
 Notas / cualquier cosa anómala:
 
