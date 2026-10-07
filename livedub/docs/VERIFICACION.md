@@ -48,6 +48,23 @@ leer `models/whisper-tiny/config.json`. Eso lo emite el propio navegador al fall
 el `fetch`, no es una excepción sin capturar y no rompe nada. Si al probar ves una
 excepción con *stack trace* no capturada, eso sí es un bug: repórtala.
 
+## Fase 3 — correcciones post-Nivel 2 (Bugs 1 y 2)
+
+| # | Comprobación | Cómo | Resultado |
+|---|---|---|---|
+| 8 | `background.js` real (con `chrome` simulado) persiste 25 subtítulos, recorta a 20, no pierde escrituras concurrentes y responde `GET_SUBTITLES` | EJECUTADO (`tests/test-subtitulos.mjs`) | Pasa |
+| 9 | Corte forzado del VAD: 30 s de habla continua producen 3 frases de ≤ 12 s | EJECUTADO (`tests/test-vad-corte.mjs`, réplica de la lógica) | Pasa |
+| 10 | `node --check` en todos los `.js` tras los cambios | EJECUTADO | Pasa |
+| 11 | Ningún contexto salvo el service worker escribe en `storage.session` | EJECUTADO (grep) | Sólo `background.js` escribe |
+| 12 | El badge pasa a «Transcribiendo…» y vuelve a «Modelo listo» en Chrome | **PENDIENTE (humano)** | — |
+| 13 | Cerrar/reabrir el popup conserva los subtítulos en Chrome | **PENDIENTE (humano)** | — |
+
+La causa raíz del Bug 1 (por qué el offscreen no conseguía escribir en
+`storage.session`) **no está diagnosticada al 100 %**: se eliminó el camino que
+fallaba en vez de averiguar el motivo exacto, porque no hay forma de depurarlo
+sin Chrome. Si tras la corrección volviera a aparecer algo parecido, el
+`console.warn` nuevo dará el mensaje de error real.
+
 ## Fase 3 — Nivel 2 (PENDIENTE, humano)
 
 1. Subtítulo tras cada frase + **latencia real medida** (no estimada).

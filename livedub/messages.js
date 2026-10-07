@@ -16,9 +16,17 @@ export const MSG = {
   // cualquiera -> offscreen (ajuste de volumen del audio original, 0..1)
   SET_GAIN: 'SET_GAIN',
 
-  // offscreen -> popup (Fase 3)
-  SUBTITLE: 'SUBTITLE',       // nueva transcripción lista
-  MODEL_STATUS: 'MODEL_STATUS', // estado de carga del modelo local
+  // offscreen -> background (Fase 3). El service worker es el ÚNICO que escribe
+  // en chrome.storage.session: desde el offscreen esas escrituras no cuajaban.
+  SUBTITLE_ADD: 'SUBTITLE_ADD',           // persistir una transcripción
+  MODEL_STATUS_SET: 'MODEL_STATUS_SET',   // persistir el estado del modelo
+
+  // popup -> background
+  GET_SUBTITLES: 'GET_SUBTITLES',         // historial + estado del modelo al abrir
+
+  // background -> popup
+  SUBTITLE: 'SUBTITLE',         // nueva transcripción lista
+  MODEL_STATUS: 'MODEL_STATUS', // estado del modelo local
 
   // offscreen/background -> popup
   CAPTURE_STARTED: 'CAPTURE_STARTED',
@@ -51,6 +59,15 @@ export const ERROR = {
 // Estado persistido por el service worker en chrome.storage.session.
 // Es la ÚNICA fuente de verdad: el SW de MV3 se suspende y pierde la memoria.
 export const CLAVE_ESTADO_SESION = 'livedub.estado';
+
+// Estados del modelo tal y como los pinta el popup.
+export const ESTADO_MODELO_UI = {
+  INACTIVO: 'inactivo',
+  CARGANDO: 'cargando',
+  LISTO: 'listo',
+  TRANSCRIBIENDO: 'transcribiendo',
+  ERROR: 'error'
+};
 
 export const ESTADO_SESION = {
   CAPTURANDO: 'CAPTURANDO',

@@ -54,6 +54,30 @@ Registro de cosas detectadas y conscientemente aplazadas.
 - **Latencia por frase sin medir:** depende de la CPU; se reportará tras la
   prueba real. No se promete tiempo real.
 
+## Fase 3 — correcciones tras la prueba de Nivel 2 (hallazgos reales)
+
+- **Bug 1 (corregido): la persistencia de subtítulos no funcionaba.** El
+  documento offscreen escribía en `chrome.storage.session` dentro de un
+  `try/catch` mudo; las escrituras no cuajaban y el error se perdía. Ahora el
+  **service worker es el único escritor** del storage (el offscreen le manda
+  `SUBTITLE_ADD` / `MODEL_STATUS_SET`) y cualquier fallo se registra con
+  `console.warn`. Cubierto por `tests/test-subtitulos.mjs`.
+- **Bug 2 (corregido): el badge del modelo se quedaba en «Modelo inactivo».**
+  Era consecuencia del Bug 1 (el estado sólo se emitía en las transiciones y, si
+  el popup estaba cerrado en ese instante, se perdía). Además el popup ahora
+  pregunta el panel al abrirse (`GET_SUBTITLES`) y hay un estado nuevo
+  **«Transcribiendo…»** para que el badge se mueva durante la inferencia.
+- **Alucinación de Whisper con habla continua (mitigado):** se añadió un corte
+  forzado a **47 bloques ≈ 12 s** (`MAX_FRASE_CHUNKS`). Criterio: Whisper trabaja
+  en ventanas de 30 s y degenera en repeticiones con buffers largos; 12 s deja
+  margen de sobra, acota la latencia por frase y conserva contexto suficiente
+  para una oración completa. **No se tocó `VAD_THRESHOLD`** (sigue en 0.005) a
+  falta de datos reales: para calibrarlo hay `livedub.vadDebug(true)`, que
+  imprime el RMS bloque a bloque, y `livedub.setVadThreshold(v)` para probar en
+  caliente sin recargar la extensión.
+- **Latencias medidas por el usuario** (i5-12400, 6c/12h): 1.9 / 1.9 / 2.1 / 3.3
+  / 3.6 / 4.6 s por frase, escalando con la duración del audio.
+
 ## Notas de alcance
 
 - El permiso **`scripting`** está declarado pero todavía no se usa:

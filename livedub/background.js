@@ -15,7 +15,11 @@ import {
   ESTADO,
   ERROR,
   CLAVE_ESTADO_SESION,
-  ESTADO_SESION
+  ESTADO_SESION,
+  CLAVE_SUBTITULOS,
+  CLAVE_MODELO,
+  MAX_SUBTITULOS,
+  ESTADO_MODELO_UI
 } from './messages.js';
 
 const RUTA_OFFSCREEN = 'offscreen.html';
@@ -49,6 +53,56 @@ async function escribirEstadoSesion(status, tabId) {
 
 const marcarCapturando = (tabId) => escribirEstadoSesion(ESTADO_SESION.CAPTURANDO, tabId);
 const marcarInactivo = () => escribirEstadoSesion(ESTADO_SESION.INACTIVO, null);
+
+/* ------------------------------------------------------------------ */
+/* Subtítulos y estado del modelo (Fase 3)                             */
+/* ------------------------------------------------------------------ */
+// El service worker es el ÚNICO escritor de chrome.storage.session. En la
+// prueba de Nivel 2 se comprobó que las escrituras hechas desde el documento
+// offscreen no llegaban a storage (y se perdían en silencio), mientras que las
+// del service worker sí. Centralizar aquí elimina el problema y además deja un
+// único punto donde recortar el historial.
+
+// Cola de escritura: evita que dos subtítulos casi simultáneos se pisen
+// (leer-modificar-escribir no es atómico).
+let cadenaEscritura = Promise.resolve();
+
+function enSerie(tarea) {
+  cadenaEscritura = cadenaEscritura.then(tarea, tarea);
+  return cadenaEscritura;
+}
+
+async function agregarSubtitulo(subtitulo) {
+  return enSerie(async () => {
+    const datos = await chrome.storage.session.get(CLAVE_SUBTITULOS);
+    const historial = Array.isArray(datos?.[CLAVE_SUBTITULOS]) ? datos[CLAVE_SUBTITULOS] : [];
+    historial.push(subtitulo);
+    while (historial.length > MAX_SUBTITULOS) historial.shift();
+    await chrome.storage.session.set({ [CLAVE_SUBTITULOS]: historial });
+
+    notificarPopup({ type: MSG.SUBTITLE, ...subtitulo });
+    return { ok: true, total: historial.length };
+  });
+}
+
+async function fijarEstadoModelo(info) {
+  const carga = {
+    estado: info?.estado || ESTADO_MODELO_UI.INACTIVO,
+    detalle: info?.detalle || '',
+    t: Date.now()
+  };
+  await chrome.storage.session.set({ [CLAVE_MODELO]: carga });
+  notificarPopup({ type: MSG.MODEL_STATUS, ...carga });
+  return { ok: true };
+}
+
+async function leerPanel() {
+  const datos = await chrome.storage.session.get([CLAVE_SUBTITULOS, CLAVE_MODELO]);
+  return {
+    subtitulos: Array.isArray(datos?.[CLAVE_SUBTITULOS]) ? datos[CLAVE_SUBTITULOS] : [],
+    modelo: datos?.[CLAVE_MODELO] || { estado: ESTADO_MODELO_UI.INACTIVO, detalle: '' }
+  };
+}
 
 /* ------------------------------------------------------------------ */
 /* Utilidades                                                          */
@@ -209,6 +263,8 @@ async function detenerCaptura() {
     }
     ultimoError = '';
     await marcarInactivo();
+    // El offscreen se está cerrando y ya no puede avisar de su propio estado.
+    await fijarEstadoModelo({ estado: ESTADO_MODELO_UI.INACTIVO }).catch(() => {});
     notificarPopup({ type: MSG.CAPTURE_STOPPED });
     return { ok: true };
   } catch (error) {
@@ -256,6 +312,23 @@ chrome.runtime.onMessage.addListener((mensaje, _remitente, responder) => {
 
     case MSG.GET_STATE:
       consultarEstado().then(responder);
+      return true;
+
+    // --- Fase 3: panel de subtítulos ---
+    case MSG.SUBTITLE_ADD:
+      agregarSubtitulo(mensaje.subtitulo)
+        .then(responder)
+        .catch((error) => responder({ ok: false, error: String(error?.message || error) }));
+      return true;
+
+    case MSG.MODEL_STATUS_SET:
+      fijarEstadoModelo(mensaje.modelo)
+        .then(responder)
+        .catch((error) => responder({ ok: false, error: String(error?.message || error) }));
+      return true;
+
+    case MSG.GET_SUBTITLES:
+      leerPanel().then(responder);
       return true;
 
     default:

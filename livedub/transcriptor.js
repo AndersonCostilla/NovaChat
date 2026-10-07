@@ -20,7 +20,7 @@ const RUTA_WORKER = 'transcriptor-worker.js';
 const MAX_EN_COLA = 2; // frases esperando; por encima, se tira la más antigua
 const TIMEOUT_MS = 120000; // 2 min por frase: si no, damos el intento por perdido
 
-export function crearTranscriptor({ onEstado, onResultado, onError } = {}) {
+export function crearTranscriptor({ onEstado, onActividad, onResultado, onError } = {}) {
   let worker = null;
   let estado = ESTADO_MODELO.INACTIVO;
   let siguienteId = 1;
@@ -143,6 +143,9 @@ export function crearTranscriptor({ onEstado, onResultado, onError } = {}) {
     const tarea = cola.shift();
     if (!tarea) return;
 
+    // Sólo informativo para la UI: el estado interno sigue siendo LISTO.
+    onActividad?.(true);
+
     const temporizador = setTimeout(() => {
       onError?.(`La transcripción de la frase ${tarea.id} tardó más de ${TIMEOUT_MS / 1000} s y se descartó.`);
       enVuelo = null;
@@ -161,6 +164,8 @@ export function crearTranscriptor({ onEstado, onResultado, onError } = {}) {
   function cancelarEnVuelo() {
     if (enVuelo?.temporizador) clearTimeout(enVuelo.temporizador);
     enVuelo = null;
+    // Si no queda nada pendiente, la UI vuelve a "Modelo listo".
+    if (cola.length === 0 && estado === ESTADO_MODELO.LISTO) onActividad?.(false);
   }
 
   /* --------------------------- Limpieza --------------------------- */

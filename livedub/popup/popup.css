@@ -176,6 +176,7 @@ select {
 .modelo--inactivo { background: #2a2e36; color: var(--suave); }
 .modelo--cargando { background: #3a3418; color: #e8d26a; }
 .modelo--listo    { background: #16331f; color: #7fe09b; }
+.modelo--transcribiendo { background: #16283a; color: #8ec7ff; }
 .modelo--error    { background: #3a1b1b; color: #ff9b9b; }
 
 .subtitulos {

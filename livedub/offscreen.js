@@ -19,24 +19,25 @@
 // El analyser cuelga de la FUENTE, no de gainOriginal: así el medidor seguirá
 // mostrando el nivel real aunque el ducking baje gainOriginal.
 
-import {
-  MSG,
-  TARGET,
-  CLAVE_SUBTITULOS,
-  CLAVE_MODELO,
-  MAX_SUBTITULOS,
-  CLAVE_IDIOMAS
-} from './messages.js';
-import { crearTranscriptor, ESTADO_MODELO } from './transcriptor.js';
+import { MSG, TARGET, CLAVE_IDIOMAS, ESTADO_MODELO_UI } from './messages.js';
+import { crearTranscriptor } from './transcriptor.js';
 
 const INTERVALO_NIVEL_MS = 100; // cada cuánto enviamos el nivel al popup
 
 /* ---------------------- Constantes del VAD ------------------------ */
 // Ajustables: dependen del material de audio.
 const FRECUENCIA_PROCESO = 16000; // Hz, lo que esperan los modelos de voz
-const VAD_THRESHOLD = 0.005; // umbral RMS por encima del cual consideramos voz
+let VAD_THRESHOLD = 0.005; // umbral RMS por encima del cual consideramos voz
+//                            (ajustable en caliente: livedub.setVadThreshold)
 const MAX_SILENCE_CHUNKS = 3; // bloques de silencio seguidos para cerrar la frase
 //                              (3 x 256 ms ≈ 750 ms)
+
+// Corte forzado: con habla continua sin pausas, el buffer crecía sin límite y
+// Whisper alucinaba (repeticiones) al recibir más de un minuto de audio.
+// 47 bloques x 256 ms ≈ 12 s, muy por debajo de la ventana de 30 s del modelo.
+const MAX_FRASE_CHUNKS = 47;
+
+let depurarVad = false; // livedub.vadDebug(true) imprime el RMS de cada bloque
 
 /* ------------------- Referencias vivas de la captura --------------- */
 let stream = null;
@@ -170,11 +171,31 @@ async function montarCadenaProcesado() {
 function procesarChunkVad(buffer, rms) {
   if (!buffer) return;
 
+  if (depurarVad) {
+    console.log(
+      `[VAD] rms=${rms.toFixed(5)} ${rms > VAD_THRESHOLD ? 'VOZ ' : 'sil '}` +
+        `bloques=${speechChunks.length} silencio=${silenceCounter}`
+    );
+  }
+
   if (rms > VAD_THRESHOLD) {
     // Hay voz: acumulamos y reiniciamos la cuenta de silencio.
     isSpeaking = true;
     silenceCounter = 0;
     speechChunks.push(buffer);
+
+    // Corte forzado si la frase se alarga demasiado (habla sin pausas).
+    // Seguimos en isSpeaking: lo siguiente que venga abre otra frase.
+    if (speechChunks.length >= MAX_FRASE_CHUNKS) {
+      const frase = ensamblarChunks(speechChunks);
+      speechChunks = [];
+      silenceCounter = 0;
+      console.log(
+        `✂️ Corte forzado a los ${(frase.length / FRECUENCIA_PROCESO).toFixed(1)} s ` +
+          '(habla continua sin pausas).'
+      );
+      onFraseDetectada(frase);
+    }
     return;
   }
 
@@ -233,6 +254,12 @@ async function montarTranscriptor() {
 
   transcriptor = crearTranscriptor({
     onEstado: (info) => publicarEstadoModelo(info),
+    // Actividad = sólo para la UI: no cambia el estado interno del transcriptor.
+    onActividad: (ocupado) =>
+      publicarEstadoModelo({
+        estado: ocupado ? ESTADO_MODELO_UI.TRANSCRIBIENDO : ESTADO_MODELO_UI.LISTO,
+        detalle: ocupado ? 'Transcribiendo la última frase…' : 'Modelo listo'
+      }),
     onResultado: (resultado) => publicarSubtitulo(resultado),
     onError: (error) => console.warn('[LiveDub] Error transcribiendo una frase:', error)
   });
@@ -245,42 +272,46 @@ async function montarTranscriptor() {
   });
 }
 
-// Estado del modelo -> popup (si está abierto) + storage.session (si no lo está).
-async function publicarEstadoModelo(info) {
-  const carga = {
-    estado: info?.estado ?? ESTADO_MODELO.INACTIVO,
-    detalle: info?.detalle ?? '',
-    t: Date.now()
-  };
-
+// El offscreen YA NO escribe en chrome.storage.session: sus escrituras no
+// cuajaban (bug detectado en la prueba de Nivel 2). Se lo pide al service
+// worker, que es el único dueño del storage y quien reenvía al popup.
+// Si el envío falla, se avisa por consola: nada de errores en silencio.
+async function pedirAlServiceWorker(mensaje, queEs) {
   try {
-    await chrome.storage.session.set({ [CLAVE_MODELO]: carga });
-  } catch (_) {
-    /* storage puede fallar si el contexto se está cerrando */
+    const respuesta = await chrome.runtime.sendMessage({ ...mensaje, target: TARGET.BACKGROUND });
+    if (respuesta && respuesta.ok === false) {
+      console.warn(`[LiveDub] El service worker no pudo guardar ${queEs}:`, respuesta.error);
+    }
+    return respuesta;
+  } catch (error) {
+    console.warn(`[LiveDub] No se pudo enviar ${queEs} al service worker:`, error?.message || error);
+    return null;
   }
-
-  chrome.runtime
-    .sendMessage({ type: MSG.MODEL_STATUS, target: TARGET.POPUP, ...carga })
-    .catch(() => {});
 }
 
-// Subtítulo -> popup + historial en storage.session (máx. MAX_SUBTITULOS).
-async function publicarSubtitulo({ texto, idiomaDetectado, duracionMs }) {
-  const subtitulo = { texto, idioma: idiomaDetectado, duracionMs, t: Date.now() };
+// Estado del modelo -> service worker -> storage.session + popup.
+function publicarEstadoModelo(info) {
+  return pedirAlServiceWorker(
+    {
+      type: MSG.MODEL_STATUS_SET,
+      modelo: {
+        estado: info?.estado ?? ESTADO_MODELO_UI.INACTIVO,
+        detalle: info?.detalle ?? ''
+      }
+    },
+    'el estado del modelo'
+  );
+}
 
-  try {
-    const datos = await chrome.storage.session.get(CLAVE_SUBTITULOS);
-    const historial = Array.isArray(datos?.[CLAVE_SUBTITULOS]) ? datos[CLAVE_SUBTITULOS] : [];
-    historial.push(subtitulo);
-    while (historial.length > MAX_SUBTITULOS) historial.shift();
-    await chrome.storage.session.set({ [CLAVE_SUBTITULOS]: historial });
-  } catch (_) {
-    /* si falla el guardado, al menos intentamos avisar al popup */
-  }
-
-  chrome.runtime
-    .sendMessage({ type: MSG.SUBTITLE, target: TARGET.POPUP, ...subtitulo })
-    .catch(() => {});
+// Subtítulo -> service worker -> historial en storage.session + popup.
+function publicarSubtitulo({ texto, idiomaDetectado, duracionMs }) {
+  return pedirAlServiceWorker(
+    {
+      type: MSG.SUBTITLE_ADD,
+      subtitulo: { texto, idioma: idiomaDetectado, duracionMs, t: Date.now() }
+    },
+    'un subtítulo'
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -430,6 +461,16 @@ globalThis.livedub = {
     modelo: transcriptor?.obtenerEstado() ?? 'inactivo',
     idiomaOrigen
   }),
-  // Permite afinar el umbral en caliente sin recargar la extensión.
-  vadInfo: () => ({ VAD_THRESHOLD, MAX_SILENCE_CHUNKS })
+  // Permite afinar el VAD en caliente, sin recargar la extensión.
+  vadInfo: () => ({ VAD_THRESHOLD, MAX_SILENCE_CHUNKS, MAX_FRASE_CHUNKS }),
+  setVadThreshold: (v) => {
+    VAD_THRESHOLD = Math.max(0, Number(v) || 0);
+    return VAD_THRESHOLD;
+  },
+  // livedub.vadDebug(true) imprime el RMS bloque a bloque: sirve para calibrar
+  // el umbral con material real en lugar de a ojo.
+  vadDebug: (activo = true) => {
+    depurarVad = Boolean(activo);
+    return depurarVad;
+  }
 };

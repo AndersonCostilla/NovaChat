@@ -117,6 +117,7 @@ function pintarEstadoModelo(info) {
     inactivo: 'Modelo inactivo',
     cargando: info?.detalle || 'Cargando modelo local…',
     listo: 'Modelo listo',
+    transcribiendo: 'Transcribiendo…',
     error: 'Modelo no disponible'
   };
   elEstadoModelo.textContent = etiquetas[estado] ?? 'Modelo inactivo';
@@ -125,9 +126,26 @@ function pintarEstadoModelo(info) {
   elEstadoModelo.title = info?.detalle || '';
 }
 
-// Al abrir el popup recuperamos lo que haya en storage.session: así no se
-// pierden los subtítulos aunque el popup haya estado cerrado.
+// Al abrir el popup recuperamos el historial. Fuente principal: el service
+// worker (único dueño de storage.session). Si no contesta, leemos el storage
+// directamente como plan B.
 async function cargarHistorial() {
+  try {
+    const panel = await chrome.runtime.sendMessage({
+      type: MSG.GET_SUBTITLES,
+      target: TARGET.BACKGROUND
+    });
+
+    if (panel && Array.isArray(panel.subtitulos)) {
+      subtitulos = panel.subtitulos;
+      pintarSubtitulos();
+      pintarEstadoModelo(panel.modelo);
+      return;
+    }
+  } catch (_) {
+    /* el service worker puede estar arrancando: probamos el plan B */
+  }
+
   try {
     const datos = await chrome.storage.session.get([CLAVE_SUBTITULOS, CLAVE_MODELO]);
     subtitulos = Array.isArray(datos?.[CLAVE_SUBTITULOS]) ? datos[CLAVE_SUBTITULOS] : [];
