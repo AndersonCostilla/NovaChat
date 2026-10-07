@@ -94,6 +94,23 @@ reales capturados en Chrome):
 | `Unable to load from local path ...: TypeError: Failed to fetch` | «Faltan los archivos del modelo en livedub/models/whisper-tiny/…» |
 | `Failed to load model because protobuf parsing failed` | «El archivo del modelo está corrupto o incompleto: vuelve a ejecutar models/descargar-modelo.sh» |
 
+## Fase 4 — Nivel 1 (traducción en→es)
+
+| # | Comprobación | Cómo | Resultado |
+|---|---|---|---|
+| 1 | `node --check` en los 11 `.js` (nuevos y modificados) | EJECUTADO | Pasa |
+| 2 | `bash -n` en `descargar-modelo-traductor.sh` | EJECUTADO | Pasa |
+| 3 | `manifest.json` válido (no necesitó cambios en esta fase) | EJECUTADO | Pasa |
+| 4 | Grep de `http(s)://` en código propio, excluyendo `libs/` | EJECUTADO | 0 coincidencias |
+| 5 | Heurística de idioma: inglés, francés, español, alemán y textos sin pistas | EJECUTADO (`tests/test-traduccion.mjs`) | 6/6 |
+| 6 | `traductor.js`: carga, cola, varias traducciones seguidas | EJECUTADO | 6/6 |
+| 7 | Caída del modelo: ninguna promesa queda colgada y el estado pasa a `error` | EJECUTADO | 4/4 |
+| 8 | Persistencia: subtítulo con original + traducción y estados de los dos módulos por separado | EJECUTADO (`background.js` real) | 4/4 |
+| 9 | Los pesos del traductor quedan fuera de Git | EJECUTADO (`git check-ignore` + archivos falsos) | Ignorados |
+| 10 | Traducción real con pesos, en Chrome | **PENDIENTE (humano)** | — |
+
+**Nivel 1 verificado / Nivel 2 pendiente de pesos + Chrome real.**
+
 ## Fases 1 y 2 — estado
 
 **VERIFICADAS de paso durante la sesión de Nivel 2 de la Fase 3**: captura,

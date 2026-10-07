@@ -1,7 +1,15 @@
 # Modelos locales de LiveDub
 
-Aquí van los pesos del modelo de reconocimiento de voz. **No están en el
-repositorio** y hay que colocarlos a mano una vez.
+Aquí van los pesos de los modelos de IA. **No están en el repositorio** y hay
+que colocarlos a mano una vez.
+
+| Carpeta | Para qué | Script |
+|---|---|---|
+| `whisper-tiny/` | Transcripción de voz (Fase 3) | `descargar-modelo.sh` |
+| `opus-mt-en-es/` | Traducción inglés → español (Fase 4) | `descargar-modelo-traductor.sh` |
+
+Los dos módulos son **independientes**: si falta el traductor, LiveDub sigue
+transcribiendo; si falta Whisper, sigue capturando audio.
 
 ## Por qué no están en Git
 
@@ -14,7 +22,8 @@ y el `.gitkeep` que mantiene visible la estructura de carpetas.
 ## Cómo obtenerlos
 
 ```bash
-bash livedub/models/descargar-modelo.sh
+bash livedub/models/descargar-modelo.sh            # Whisper (transcripción)
+bash livedub/models/descargar-modelo-traductor.sh  # OPUS-MT (traducción)
 ```
 
 El script usa `curl -L --fail`, comprueba que ningún archivo haya quedado vacío o
@@ -48,7 +57,34 @@ pide el modelo con el id `whisper-tiny` y `env.localModelPath` apunta a
 `chrome-extension://<id>/models/`, de modo que transformers.js busca justo en
 `models/whisper-tiny/...`.
 
-## Modelo elegido
+## Traductor: `Xenova/opus-mt-en-es`
+
+Familia OPUS-MT (Helsinki-NLP), ONNX cuantizado int8. Estructura esperada:
+
+```
+livedub/models/
+  opus-mt-en-es/
+    config.json
+    tokenizer_config.json
+    vocab.json            (o tokenizer.json, según publique el repo)
+    source.spm            (SentencePiece, opcional según el repo)
+    target.spm
+    onnx/
+      encoder_model_quantized.onnx
+      decoder_model_merged_quantized.onnx
+```
+
+> ⚠️ **Lista orientativa, no verificada en vivo.** Igual que con Whisper, el
+> entorno donde se escribió el script no tiene acceso a huggingface.co. Los
+> archivos marcados como opcionales en el script (`generation_config.json`,
+> `source.spm`, `target.spm`, `vocab.json`) no hacen fracasar la descarga si no
+> existen, porque distintos repos de Marian publican combinaciones distintas.
+> Si al cargar falla por un archivo concreto, añádelo a `ARCHIVOS` en el script.
+
+La carpeta debe llamarse exactamente `opus-mt-en-es`: el worker pide el modelo
+con ese id y `env.localModelPath` apunta a `models/`.
+
+## Modelo de transcripción elegido
 
 `Xenova/whisper-tiny`, multilingüe, ONNX **cuantizado a int8** (`quantized: true`
 en el pipeline). Es el compromiso razonable para CPU + WASM dentro de una
@@ -58,6 +94,10 @@ sustituir esta carpeta y el id en `montarTranscriptor()` (`offscreen.js`).
 
 ## Sin pesos, ¿qué pasa?
 
-Nada grave y a propósito: el worker falla al cargar, el popup muestra
-**«Modelo no disponible»** con el motivo, y LiveDub sigue en **modo solo captura**
-(audio audible, medidor de nivel y segmentación VAD siguen funcionando).
+Nada grave y a propósito, con degradación **independiente por módulo**:
+
+- **Sin Whisper**: el popup muestra «Modelo no disponible» y LiveDub queda en
+  modo solo captura (audio audible, medidor y VAD siguen funcionando).
+- **Sin el traductor**: la transcripción sigue apareciendo con normalidad; cada
+  subtítulo lleva el aviso «Traducción no disponible…» y la insignia muestra
+  «Traductor no disponible».

@@ -24,7 +24,14 @@
     <section class="bloque">
       <div class="subtitulos__cabecera">
         <h2>Subtítulos en vivo</h2>
-        <span id="estadoModelo" class="modelo modelo--inactivo">Modelo inactivo</span>
+        <div class="insignias">
+          <span id="estadoModelo" class="modelo modelo--inactivo" title="Modelo de transcripción">
+            Modelo inactivo
+          </span>
+          <span id="estadoTraductor" class="modelo modelo--inactivo" title="Modelo de traducción">
+            Traductor inactivo
+          </span>
+        </div>
       </div>
       <ul id="listaSubtitulos" class="subtitulos">
         <li class="subtitulos__vacio">Aún no hay transcripciones.</li>
@@ -62,7 +69,8 @@
       <p class="nota">
         El idioma origen se usa para la transcripción local
         («Detectar automáticamente» deja que Whisper lo deduzca).
-        El idioma destino todavía no hace nada: se usará al traducir.
+        El idioma destino todavía no se puede cambiar: esta fase traduce
+        únicamente inglés → español.
       </p>
     </section>
 

@@ -2,7 +2,11 @@ node_modules/
 .DS_Store
 *.zip
 
-# Pesos del modelo Whisper: fuera de Git por tamaño (decenas de MB).
-# Se obtienen con: bash livedub/models/descargar-modelo.sh
+# Pesos de los modelos: fuera de Git por tamaño (decenas de MB cada uno).
+# Se obtienen con los scripts de livedub/models/.
 livedub/models/whisper-tiny/*
 !livedub/models/whisper-tiny/.gitkeep
+
+livedub/models/opus-mt-en-es/*
+!livedub/models/opus-mt-en-es/.gitkeep
+!livedub/models/opus-mt-en-es/README.md

@@ -66,7 +66,14 @@ export const ESTADO_MODELO_UI = {
   CARGANDO: 'cargando',
   LISTO: 'listo',
   TRANSCRIBIENDO: 'transcribiendo',
+  TRADUCIENDO: 'traduciendo',
   ERROR: 'error'
+};
+
+// Los dos módulos de IA son independientes: si uno falla, el otro sigue.
+export const MODULO = {
+  TRANSCRIPCION: 'transcripcion',
+  TRADUCCION: 'traduccion'
 };
 
 export const ESTADO_SESION = {
@@ -77,7 +84,8 @@ export const ESTADO_SESION = {
 // Búfer de subtítulos y estado del modelo en chrome.storage.session, para que
 // el popup pueda cerrarse y reabrirse sin perder lo transcrito.
 export const CLAVE_SUBTITULOS = 'livedub.subtitulos';
-export const CLAVE_MODELO = 'livedub.modelo';
+export const CLAVE_MODELO = 'livedub.modelo'; // estado del modelo de transcripción
+export const CLAVE_TRADUCTOR = 'livedub.traductor'; // estado del modelo de traducción
 export const MAX_SUBTITULOS = 20; // cuántas frases guardamos como historial
 
 // Clave usada en chrome.storage.local para las preferencias de idioma.

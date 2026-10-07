@@ -6,6 +6,8 @@
 //           mono y segmentarlo en "frases" con un VAD por detección de silencios.
 //  (Fase 3) mandar cada frase al worker de transcripción local (Whisper WASM) y
 //           publicar el texto resultante como subtítulo.
+//  (Fase 4) si el texto está en inglés, traducirlo al español con un SEGUNDO
+//           worker independiente y publicar original + traducción.
 //
 // Grafo de audio:
 //
@@ -19,8 +21,10 @@
 // El analyser cuelga de la FUENTE, no de gainOriginal: así el medidor seguirá
 // mostrando el nivel real aunque el ducking baje gainOriginal.
 
-import { MSG, TARGET, CLAVE_IDIOMAS, ESTADO_MODELO_UI } from './messages.js';
+import { MSG, TARGET, CLAVE_IDIOMAS, ESTADO_MODELO_UI, MODULO } from './messages.js';
 import { crearTranscriptor } from './transcriptor.js';
+import { crearTraductor } from './traductor.js';
+import { detectarIdioma, NOMBRE_IDIOMA } from './detector-idioma.js';
 
 const INTERVALO_NIVEL_MS = 100; // cada cuánto enviamos el nivel al popup
 
@@ -57,8 +61,9 @@ let fuenteProcessing = null;
 let workletNode = null;
 let sumideroMudo = null;
 
-// Transcripción (Fase 3).
+// Transcripción (Fase 3) y traducción (Fase 4).
 let transcriptor = null;
+let traductor = null;
 let idiomaOrigen = 'auto'; // se lee de chrome.storage.local (preferencias del popup)
 
 /* ------------------------ Estado del VAD --------------------------- */
@@ -276,7 +281,7 @@ async function montarTranscriptor() {
         estado: ocupado ? ESTADO_MODELO_UI.TRANSCRIBIENDO : ESTADO_MODELO_UI.LISTO,
         detalle: ocupado ? 'Transcribiendo la última frase…' : 'Modelo listo'
       }),
-    onResultado: (resultado) => publicarSubtitulo(resultado),
+    onResultado: (resultado) => traducirYPublicar(resultado),
     onError: (error) => console.warn('[LiveDub] Error transcribiendo una frase:', error)
   });
 
@@ -286,6 +291,61 @@ async function montarTranscriptor() {
     rutaWasm: chrome.runtime.getURL('libs/transformers/'),
     modelo: 'whisper-tiny'
   });
+
+  montarTraductor();
+}
+
+// Fase 4: worker de traducción, totalmente independiente del de Whisper.
+function montarTraductor() {
+  traductor = crearTraductor({
+    onEstado: (info) => publicarEstadoModelo(info, MODULO.TRADUCCION),
+    onActividad: (ocupado) =>
+      publicarEstadoModelo(
+        {
+          estado: ocupado ? ESTADO_MODELO_UI.TRADUCIENDO : ESTADO_MODELO_UI.LISTO,
+          detalle: ocupado ? 'Traduciendo la última frase…' : 'Traductor listo'
+        },
+        MODULO.TRADUCCION
+      ),
+    onError: (error) => console.warn('[LiveDub] Error traduciendo una frase:', error)
+  });
+
+  traductor.iniciar({
+    rutaModelos: chrome.runtime.getURL('models/'),
+    rutaWasm: chrome.runtime.getURL('libs/transformers/'),
+    modelo: 'opus-mt-en-es'
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Regla de idioma (Fase 4: sólo inglés → español)                     */
+/* ------------------------------------------------------------------ */
+
+// Decide si una transcripción se traduce. Devuelve { traducir, aviso }.
+function decidirTraduccion(texto) {
+  if (idiomaOrigen === 'en') {
+    return { traducir: true, aviso: '' };
+  }
+
+  if (idiomaOrigen !== 'auto') {
+    const nombre = NOMBRE_IDIOMA[idiomaOrigen] || idiomaOrigen;
+    return {
+      traducir: false,
+      aviso: `Traducción no disponible para ${nombre} (por ahora sólo inglés → español).`
+    };
+  }
+
+  // Idioma origen en «automático»: Whisper no nos dice qué idioma detectó, así
+  // que usamos una heurística sobre el texto. Si no parece inglés, no se
+  // traduce: mejor quedarse corto que inventar una traducción incorrecta.
+  const pista = detectarIdioma(texto);
+  if (pista.esIngles) return { traducir: true, aviso: '' };
+
+  const nombre = NOMBRE_IDIOMA[pista.idioma] || pista.idioma;
+  return {
+    traducir: false,
+    aviso: `El texto no parece inglés (${nombre}): traducción no disponible (por ahora sólo inglés → español).`
+  };
 }
 
 // El offscreen YA NO escribe en chrome.storage.session: sus escrituras no
@@ -305,26 +365,70 @@ async function pedirAlServiceWorker(mensaje, queEs) {
   }
 }
 
-// Estado del modelo -> service worker -> storage.session + popup.
-function publicarEstadoModelo(info) {
+// Estado de un modelo (transcripción o traducción) -> SW -> storage + popup.
+function publicarEstadoModelo(info, modulo = MODULO.TRANSCRIPCION) {
   return pedirAlServiceWorker(
     {
       type: MSG.MODEL_STATUS_SET,
+      modulo,
       modelo: {
         estado: info?.estado ?? ESTADO_MODELO_UI.INACTIVO,
         detalle: info?.detalle ?? ''
       }
     },
-    'el estado del modelo'
+    `el estado del módulo de ${modulo}`
   );
 }
 
+// Transcripción lista -> (si procede) traducción -> publicación única.
+// Se publica una sola vez, con original y traducción juntos, para no tener que
+// reinventar el canal de persistencia con actualizaciones parciales.
+async function traducirYPublicar({ texto, idiomaDetectado, duracionMs }) {
+  const decision = decidirTraduccion(texto);
+
+  let traduccion = '';
+  let duracionTraduccionMs = 0;
+  let aviso = decision.aviso;
+
+  if (decision.traducir) {
+    const estadoTraductor = traductor?.obtenerEstado();
+    const resultado = await (traductor?.traducir(texto) ??
+      Promise.resolve({ traduccion: '', motivo: 'traductor no iniciado' }));
+
+    traduccion = resultado.traduccion || '';
+    duracionTraduccionMs = resultado.duracionMs || 0;
+
+    if (!traduccion) {
+      // Degradación independiente: sin traducción, pero el subtítulo se publica.
+      aviso = `Traducción no disponible (${resultado.motivo || estadoTraductor || 'desconocido'}).`;
+    }
+  }
+
+  return publicarSubtitulo({
+    texto,
+    traduccion,
+    aviso,
+    idiomaDetectado,
+    duracionMs,
+    duracionTraduccionMs
+  });
+}
+
 // Subtítulo -> service worker -> historial en storage.session + popup.
-function publicarSubtitulo({ texto, idiomaDetectado, duracionMs }) {
+function publicarSubtitulo({ texto, traduccion, aviso, idiomaDetectado, duracionMs, duracionTraduccionMs }) {
   return pedirAlServiceWorker(
     {
       type: MSG.SUBTITLE_ADD,
-      subtitulo: { texto, idioma: idiomaDetectado, duracionMs, t: Date.now() }
+      subtitulo: {
+        texto,
+        traduccion: traduccion || '',
+        aviso: aviso || '',
+        idioma: idiomaDetectado,
+        duracionMs,
+        duracionTraduccionMs: duracionTraduccionMs || 0,
+        totalMs: (duracionMs || 0) + (duracionTraduccionMs || 0),
+        t: Date.now()
+      }
     },
     'un subtítulo'
   );
@@ -371,9 +475,11 @@ function pararMedidor() {
 async function detener() {
   pararMedidor();
 
-  // --- Transcripción (Fase 3) ---
+  // --- Transcripción (Fase 3) y traducción (Fase 4) ---
   transcriptor?.destruir();
   transcriptor = null;
+  traductor?.destruir();
+  traductor = null;
 
   if (stream) {
     stream.getTracks().forEach((pista) => pista.stop());
@@ -476,6 +582,7 @@ globalThis.livedub = {
     frecuenciaProceso: contextProcessing?.sampleRate ?? null,
     vad: { isSpeaking, bloquesAcumulados: speechChunks.length, silenceCounter },
     modelo: transcriptor?.obtenerEstado() ?? 'inactivo',
+    traductor: traductor?.obtenerEstado() ?? 'inactivo',
     frasesDescartadas,
     idiomaOrigen
   }),

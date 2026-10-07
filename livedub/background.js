@@ -18,8 +18,10 @@ import {
   ESTADO_SESION,
   CLAVE_SUBTITULOS,
   CLAVE_MODELO,
+  CLAVE_TRADUCTOR,
   MAX_SUBTITULOS,
-  ESTADO_MODELO_UI
+  ESTADO_MODELO_UI,
+  MODULO
 } from './messages.js';
 
 const RUTA_OFFSCREEN = 'offscreen.html';
@@ -85,22 +87,30 @@ async function agregarSubtitulo(subtitulo) {
   });
 }
 
-async function fijarEstadoModelo(info) {
+// Hay dos módulos de IA (transcripción y traducción) con estados separados:
+// cada uno vive en su propia clave y el popup pinta dos indicadores.
+function claveDeModulo(modulo) {
+  return modulo === MODULO.TRADUCCION ? CLAVE_TRADUCTOR : CLAVE_MODELO;
+}
+
+async function fijarEstadoModelo(info, modulo = MODULO.TRANSCRIPCION) {
   const carga = {
     estado: info?.estado || ESTADO_MODELO_UI.INACTIVO,
     detalle: info?.detalle || '',
+    modulo,
     t: Date.now()
   };
-  await chrome.storage.session.set({ [CLAVE_MODELO]: carga });
+  await chrome.storage.session.set({ [claveDeModulo(modulo)]: carga });
   notificarPopup({ type: MSG.MODEL_STATUS, ...carga });
   return { ok: true };
 }
 
 async function leerPanel() {
-  const datos = await chrome.storage.session.get([CLAVE_SUBTITULOS, CLAVE_MODELO]);
+  const datos = await chrome.storage.session.get([CLAVE_SUBTITULOS, CLAVE_MODELO, CLAVE_TRADUCTOR]);
   return {
     subtitulos: Array.isArray(datos?.[CLAVE_SUBTITULOS]) ? datos[CLAVE_SUBTITULOS] : [],
-    modelo: datos?.[CLAVE_MODELO] || { estado: ESTADO_MODELO_UI.INACTIVO, detalle: '' }
+    modelo: datos?.[CLAVE_MODELO] || { estado: ESTADO_MODELO_UI.INACTIVO, detalle: '' },
+    traductor: datos?.[CLAVE_TRADUCTOR] || { estado: ESTADO_MODELO_UI.INACTIVO, detalle: '' }
   };
 }
 
@@ -264,7 +274,8 @@ async function detenerCaptura() {
     ultimoError = '';
     await marcarInactivo();
     // El offscreen se está cerrando y ya no puede avisar de su propio estado.
-    await fijarEstadoModelo({ estado: ESTADO_MODELO_UI.INACTIVO }).catch(() => {});
+    await fijarEstadoModelo({ estado: ESTADO_MODELO_UI.INACTIVO }, MODULO.TRANSCRIPCION).catch(() => {});
+    await fijarEstadoModelo({ estado: ESTADO_MODELO_UI.INACTIVO }, MODULO.TRADUCCION).catch(() => {});
     notificarPopup({ type: MSG.CAPTURE_STOPPED });
     return { ok: true };
   } catch (error) {
@@ -322,7 +333,7 @@ chrome.runtime.onMessage.addListener((mensaje, _remitente, responder) => {
       return true;
 
     case MSG.MODEL_STATUS_SET:
-      fijarEstadoModelo(mensaje.modelo)
+      fijarEstadoModelo(mensaje.modelo, mensaje.modulo)
         .then(responder)
         .catch((error) => responder({ ok: false, error: String(error?.message || error) }));
       return true;

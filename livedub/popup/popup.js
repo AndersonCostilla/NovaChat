@@ -10,7 +10,9 @@ import {
   CLAVE_IDIOMAS,
   CLAVE_SUBTITULOS,
   CLAVE_MODELO,
-  MAX_SUBTITULOS
+  CLAVE_TRADUCTOR,
+  MAX_SUBTITULOS,
+  MODULO
 } from '../messages.js';
 
 const elBoton = document.getElementById('botonPrincipal');
@@ -20,6 +22,7 @@ const elOrigen = document.getElementById('idiomaOrigen');
 const elDestino = document.getElementById('idiomaDestino');
 const elListaSubtitulos = document.getElementById('listaSubtitulos');
 const elEstadoModelo = document.getElementById('estadoModelo');
+const elEstadoTraductor = document.getElementById('estadoTraductor');
 
 let estadoActual = ESTADO.INACTIVO;
 
@@ -88,21 +91,62 @@ function pintarSubtitulos() {
   for (const s of subtitulos) {
     const li = document.createElement('li');
 
+    // Cabecera: hora · idioma · tiempos (transcripción + traducción).
     const meta = document.createElement('span');
     meta.className = 'subtitulo__meta';
     const idioma = s.idioma && s.idioma !== 'auto' ? ` · ${s.idioma}` : '';
-    const tardanza = s.duracionMs ? ` · ${(s.duracionMs / 1000).toFixed(1)} s` : '';
-    meta.textContent = `${horaDe(s.t)}${idioma}${tardanza}`;
+    const tTranscripcion = s.duracionMs ? ` · ${(s.duracionMs / 1000).toFixed(1)} s` : '';
+    const tTraduccion = s.duracionTraduccionMs
+      ? ` + ${(s.duracionTraduccionMs / 1000).toFixed(1)} s`
+      : '';
+    const tTotal = s.totalMs && s.duracionTraduccionMs
+      ? ` = ${(s.totalMs / 1000).toFixed(1)} s`
+      : '';
+    meta.textContent = `${horaDe(s.t)}${idioma}${tTranscripcion}${tTraduccion}${tTotal}`;
+    li.appendChild(meta);
 
-    const texto = document.createElement('span');
-    texto.textContent = s.texto; // textContent: nada de HTML inyectado
+    // Línea del texto original.
+    li.appendChild(
+      lineaSubtitulo('EN', 'subtitulo__etiqueta--en', s.texto, 'subtitulo__original')
+    );
 
-    li.append(meta, texto);
+    // Línea de la traducción, sólo si existe.
+    if (s.traduccion) {
+      li.appendChild(
+        lineaSubtitulo('ES', 'subtitulo__etiqueta--es', s.traduccion, 'subtitulo__traduccion')
+      );
+    }
+
+    // Aviso (idioma no soportado, traductor caído...). Nunca falla en silencio.
+    if (s.aviso) {
+      const aviso = document.createElement('span');
+      aviso.className = 'subtitulo__aviso';
+      aviso.textContent = `⚠ ${s.aviso}`;
+      li.appendChild(aviso);
+    }
+
     elListaSubtitulos.appendChild(li);
   }
 
   // Siempre mirando lo último transcrito.
   elListaSubtitulos.scrollTop = elListaSubtitulos.scrollHeight;
+}
+
+// Una línea «ETIQUETA  texto» del panel de subtítulos.
+function lineaSubtitulo(etiqueta, claseEtiqueta, texto, claseTexto) {
+  const linea = document.createElement('div');
+  linea.className = 'subtitulo__linea';
+
+  const marca = document.createElement('span');
+  marca.className = `subtitulo__etiqueta ${claseEtiqueta}`;
+  marca.textContent = etiqueta;
+
+  const cuerpo = document.createElement('span');
+  cuerpo.className = claseTexto;
+  cuerpo.textContent = texto; // textContent: nada de HTML inyectado
+
+  linea.append(marca, cuerpo);
+  return linea;
 }
 
 function agregarSubtitulo(subtitulo) {
@@ -111,19 +155,36 @@ function agregarSubtitulo(subtitulo) {
   pintarSubtitulos();
 }
 
-function pintarEstadoModelo(info) {
-  const estado = info?.estado || 'inactivo';
-  const etiquetas = {
+// Dos indicadores independientes: transcripción y traducción.
+const ETIQUETAS_MODELO = {
+  [MODULO.TRANSCRIPCION]: {
     inactivo: 'Modelo inactivo',
-    cargando: info?.detalle || 'Cargando modelo local…',
+    cargando: 'Cargando modelo local…',
     listo: 'Modelo listo',
     transcribiendo: 'Transcribiendo…',
     error: 'Modelo no disponible'
-  };
-  elEstadoModelo.textContent = etiquetas[estado] ?? 'Modelo inactivo';
-  elEstadoModelo.className = `modelo modelo--${estado}`;
-  // El detalle completo del error se ve al pasar el ratón por encima.
-  elEstadoModelo.title = info?.detalle || '';
+  },
+  [MODULO.TRADUCCION]: {
+    inactivo: 'Traductor inactivo',
+    cargando: 'Cargando traductor…',
+    listo: 'Traductor listo',
+    traduciendo: 'Traduciendo…',
+    error: 'Traductor no disponible'
+  }
+};
+
+function pintarEstadoModelo(info, modulo = MODULO.TRANSCRIPCION) {
+  const elemento = modulo === MODULO.TRADUCCION ? elEstadoTraductor : elEstadoModelo;
+  const estado = info?.estado || 'inactivo';
+  const etiquetas = ETIQUETAS_MODELO[modulo];
+
+  const texto =
+    estado === 'cargando' && info?.detalle ? info.detalle : etiquetas[estado] ?? etiquetas.inactivo;
+
+  elemento.textContent = texto;
+  elemento.className = `modelo modelo--${estado}`;
+  // El detalle completo (causa del error, por ejemplo) al pasar el ratón.
+  elemento.title = info?.detalle || '';
 }
 
 // Al abrir el popup recuperamos el historial. Fuente principal: el service
@@ -139,7 +200,8 @@ async function cargarHistorial() {
     if (panel && Array.isArray(panel.subtitulos)) {
       subtitulos = panel.subtitulos;
       pintarSubtitulos();
-      pintarEstadoModelo(panel.modelo);
+      pintarEstadoModelo(panel.modelo, MODULO.TRANSCRIPCION);
+      pintarEstadoModelo(panel.traductor, MODULO.TRADUCCION);
       return;
     }
   } catch (_) {
@@ -147,10 +209,11 @@ async function cargarHistorial() {
   }
 
   try {
-    const datos = await chrome.storage.session.get([CLAVE_SUBTITULOS, CLAVE_MODELO]);
+    const datos = await chrome.storage.session.get([CLAVE_SUBTITULOS, CLAVE_MODELO, CLAVE_TRADUCTOR]);
     subtitulos = Array.isArray(datos?.[CLAVE_SUBTITULOS]) ? datos[CLAVE_SUBTITULOS] : [];
     pintarSubtitulos();
-    pintarEstadoModelo(datos?.[CLAVE_MODELO]);
+    pintarEstadoModelo(datos?.[CLAVE_MODELO], MODULO.TRANSCRIPCION);
+    pintarEstadoModelo(datos?.[CLAVE_TRADUCTOR], MODULO.TRADUCCION);
   } catch (_) {
     pintarSubtitulos();
   }
@@ -251,14 +314,21 @@ chrome.runtime.onMessage.addListener((mensaje) => {
     case MSG.SUBTITLE:
       agregarSubtitulo({
         texto: mensaje.texto,
+        traduccion: mensaje.traduccion,
+        aviso: mensaje.aviso,
         idioma: mensaje.idioma,
         duracionMs: mensaje.duracionMs,
+        duracionTraduccionMs: mensaje.duracionTraduccionMs,
+        totalMs: mensaje.totalMs,
         t: mensaje.t || Date.now()
       });
       break;
 
     case MSG.MODEL_STATUS:
-      pintarEstadoModelo({ estado: mensaje.estado, detalle: mensaje.detalle });
+      pintarEstadoModelo(
+        { estado: mensaje.estado, detalle: mensaje.detalle },
+        mensaje.modulo || MODULO.TRANSCRIPCION
+      );
       break;
 
     case MSG.CAPTURE_ERROR:

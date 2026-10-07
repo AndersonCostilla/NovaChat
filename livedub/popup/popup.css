@@ -177,6 +177,14 @@ select {
 .modelo--cargando { background: #3a3418; color: #e8d26a; }
 .modelo--listo    { background: #16331f; color: #7fe09b; }
 .modelo--transcribiendo { background: #16283a; color: #8ec7ff; }
+.modelo--traduciendo    { background: #2a1f3a; color: #c9a7ff; }
+
+.insignias {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 3px;
+}
 .modelo--error    { background: #3a1b1b; color: #ff9b9b; }
 
 .subtitulos {
@@ -208,4 +216,48 @@ select {
   color: var(--suave);
   font-size: 10px;
   margin-bottom: 2px;
+}
+
+/* ---------------- Original + traducción (Fase 4) ---------------- */
+
+.subtitulo__linea {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.subtitulo__etiqueta {
+  flex: 0 0 auto;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.subtitulo__etiqueta--en {
+  background: #2a2e36;
+  color: var(--suave);
+}
+
+.subtitulo__etiqueta--es {
+  background: #16331f;
+  color: #7fe09b;
+}
+
+.subtitulo__original {
+  color: var(--suave);
+}
+
+.subtitulo__traduccion {
+  color: var(--texto);
+  font-weight: 600;
+}
+
+.subtitulo__aviso {
+  display: block;
+  margin-top: 3px;
+  color: #e8d26a;
+  font-size: 10px;
+  line-height: 1.3;
 }

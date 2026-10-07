@@ -105,6 +105,25 @@ Ajustes añadidos al cerrar, a partir de los hallazgos del usuario:
   Sigue en 0.005, valor puesto a ojo y nunca ajustado con medidas.
 - Vigilar si con frases de 12 s reaparecen repeticiones menores en audio denso.
 
+## Fase 4 — traducción inglés → español
+
+- **Estado:** código completo, **Nivel 1 verificado** (node --check, manifest,
+  grep de URLs, 20 comprobaciones automáticas en `tests/test-traduccion.mjs`).
+  **Nivel 2 PENDIENTE**: faltan los pesos del traductor y la prueba en Chrome.
+- **Nombres de archivo del traductor sin verificar en vivo** (huggingface.co
+  sigue bloqueado aquí). `descargar-modelo-traductor.sh` marca como opcionales
+  `generation_config.json`, `source.spm`, `target.spm` y `vocab.json` porque los
+  repos Marian publican combinaciones distintas; si falta uno obligatorio, hay
+  que añadirlo a la lista `ARCHIVOS`.
+- **La heurística de idioma no es un modelo**: cuenta palabras frecuentes y
+  acentos. Con frases muy cortas devuelve «desconocido» y, por prudencia, NO
+  traduce. Si molesta, la solución limpia es seleccionar «Inglés» en el popup.
+- **Decisión: se publica un único subtítulo** con original + traducción, en vez
+  de publicar el original y actualizarlo después. Motivo: no reinventar el canal
+  de persistencia con actualizaciones parciales. Coste: el subtítulo aparece
+  ~0.3-1 s más tarde (lo que tarde la traducción).
+- **El selector de idioma destino sigue sin efecto**: esta fase es sólo en→es.
+
 ## Notas de alcance
 
 - El permiso **`scripting`** está declarado pero todavía no se usa:

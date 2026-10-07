@@ -1,4 +1,4 @@
-# LiveDub — Fases 1-3 (captura + VAD + transcripción local)
+# LiveDub — Fases 1-4 (captura + VAD + transcripción + traducción local)
 
 Extensión de Chrome (Manifest V3) en JavaScript vanilla con módulos ES.
 **Sin frameworks, sin paso de build, sin CDN, sin servicios de pago.**
@@ -18,7 +18,11 @@ Hasta ahora LiveDub **sólo** hace esto:
    transformers.js + WASM, sin red) en un Worker dedicado, y muestra el texto en
    el panel «Subtítulos en vivo» del popup.
 
-**No hay traducción, ni TTS, ni ducking real, ni overlay en la página.**
+7. **(Fase 4)** Si el texto está en inglés, lo traduce al español con un
+   **segundo worker independiente** (OPUS-MT local) y el panel muestra las dos
+   versiones: `EN:` original y `ES:` traducción.
+
+**No hay TTS, ni ducking real, ni overlay en la página, ni otros pares de idiomas.**
 Eso llega en fases posteriores. La transcripción es en el idioma original
 (`task: 'transcribe'`, nunca `translate`).
 
@@ -64,6 +68,27 @@ LiveDub funciona en **modo solo captura**, sin romperse.
 Reglas de la cola: una frase en vuelo a la vez, como mucho 2 esperando (las más
 viejas se descartan para no acumular retraso) y 120 s de tiempo máximo por frase.
 
+## Traducción local (Fase 4)
+
+Sólo **inglés → español** en esta fase. El texto transcrito pasa por un worker
+aparte (`traductor-worker.js`) con el modelo OPUS-MT, y el subtítulo se publica
+una sola vez con original y traducción juntos.
+
+Cuándo se traduce:
+
+| Idioma origen en el popup | Qué hace |
+|---|---|
+| **Inglés** | Traduce siempre |
+| **Detectar automáticamente** | Aplica la heurística de `detector-idioma.js`; si no parece inglés, no traduce y avisa |
+| Cualquier otro | No traduce y avisa en el propio subtítulo |
+
+La heurística existe porque transformers.js 2.x no expone el idioma que Whisper
+detecta; antes que traducir francés con un modelo en→es, se avisa. Si el usuario
+selecciona «Inglés» a mano, manda su elección y la heurística no se usa.
+
+Los dos modelos son **independientes**: si el traductor falla, la transcripción
+sigue apareciendo con un aviso en cada subtítulo.
+
 ---
 
 ## Estructura
@@ -78,8 +103,12 @@ livedub/
   vad-processor.js     AudioWorkletProcessor: bloques de 4096 muestras + RMS
   transcriptor.js      Orquestación: cola de frases y estado del modelo
   transcriptor-worker.js  Worker dedicado: pipeline Whisper local (WASM)
+  traductor.js         Orquestación de la traducción (cola y estado)
+  traductor-worker.js  Worker dedicado: pipeline OPUS-MT en→es (WASM)
+  detector-idioma.js   Heurística para no traducir lo que no es inglés
   libs/transformers/   @xenova/transformers 2.17.2 vendorizado + ort-wasm-simd
-  models/whisper-tiny/ Pesos del modelo (NO están en Git, ver models/README.md)
+  models/whisper-tiny/   Pesos de Whisper (NO están en Git)
+  models/opus-mt-en-es/  Pesos del traductor (NO están en Git)
   popup/
     popup.html
     popup.css
