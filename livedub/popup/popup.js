@@ -204,8 +204,14 @@ async function cargarHistorial() {
       pintarEstadoModelo(panel.traductor, MODULO.TRADUCCION);
       return;
     }
-  } catch (_) {
-    /* el service worker puede estar arrancando: probamos el plan B */
+  } catch (error) {
+    // El plan B es legítimo (el service worker puede estar arrancando), pero
+    // callarse el motivo fue justo lo que escondió dos bugs en fases
+    // anteriores: un catch puede decidir no actuar, nunca no informar.
+    console.warn(
+      '[LiveDub] GET_SUBTITLES falló, leyendo el historial directo de storage:',
+      error?.message || error
+    );
   }
 
   try {
@@ -214,7 +220,8 @@ async function cargarHistorial() {
     pintarSubtitulos();
     pintarEstadoModelo(datos?.[CLAVE_MODELO], MODULO.TRANSCRIPCION);
     pintarEstadoModelo(datos?.[CLAVE_TRADUCTOR], MODULO.TRADUCCION);
-  } catch (_) {
+  } catch (error) {
+    console.warn('[LiveDub] No se pudo leer el historial de storage.session:', error?.message || error);
     pintarSubtitulos();
   }
 }
@@ -350,7 +357,10 @@ chrome.runtime.onMessage.addListener((mensaje) => {
       target: TARGET.BACKGROUND
     });
     pintarEstado(estado?.estado || ESTADO.INACTIVO, estado?.error || '');
-  } catch (_) {
+  } catch (error) {
+    // Ojo: si esto salta, el popup pinta "Inactivo" aunque la captura esté
+    // corriendo. Sin este aviso parecería un bug de estado y no de mensajería.
+    console.warn('[LiveDub] GET_STATE falló, asumiendo INACTIVO:', error?.message || error);
     pintarEstado(ESTADO.INACTIVO);
   }
 })();

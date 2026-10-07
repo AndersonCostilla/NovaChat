@@ -114,6 +114,8 @@ reales capturados en Chrome):
 | 9 | Los pesos del traductor quedan fuera de Git | EJECUTADO (`git check-ignore` + archivos falsos) | Ignorados |
 | 10 | Traducción real con pesos, en Chrome | **PENDIENTE (humano)** | — |
 | 11 | Ningún archivo del offscreen usa APIs fuera de `chrome.runtime`, y `offscreen.js` carga con el `chrome` restringido real | EJECUTADO (`tests/test-offscreen-apis.mjs`) | 7/7 — verificada reintroduciendo el bug |
+| 12 | Un worker de traducción que no responde acaba en `error` y no deja promesas colgadas | EJECUTADO (`tests/test-traductor-vigilante.mjs`) | 11/11 — verificada desactivando el vigilante (2/6 colgadas) |
+| 13 | La lista de archivos del modelo traductor coincide con lo que exige la librería | EJECUTADO (lectura de `transformers.min.js`) | `tokenizer.json` era obligatorio y faltaba en el script |
 
 **Nivel 1 verificado / Nivel 2 pendiente de pesos + Chrome real.**
 

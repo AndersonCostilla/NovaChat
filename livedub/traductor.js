@@ -17,6 +17,14 @@ const RUTA_WORKER = 'traductor-worker.js';
 const MAX_EN_COLA = 4; // traducir texto es rápido; aguanta más cola que Whisper
 const TIMEOUT_MS = 30000; // 30 s por frase: si no, se da por perdida
 
+// Vigilante de carga. El modelo está en disco (unos 113 MB): cargarlo son
+// segundos. Si en 90 s no hay ni 'listo' ni 'error', algo se ha quedado
+// colgado y es preferible declararlo roto que dejar el badge girando para
+// siempre y la cola descartando frases en silencio.
+const TIMEOUT_CARGA_MS = 90000;
+
+const LOG = '[LiveDub][traductor]';
+
 export function crearTraductor({ onEstado, onActividad, onError } = {}) {
   let worker = null;
   let estado = ESTADO_TRADUCTOR.INACTIVO;
@@ -25,10 +33,42 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
   const cola = []; // { id, texto, resolver }
   const pendientes = new Map(); // id -> { resolver, temporizador }
   let enVuelo = false;
+  let vigilanteCarga = null;
 
   function fijarEstado(nuevo, detalle = {}) {
+    const anterior = estado;
     estado = nuevo;
+    if (nuevo !== anterior) console.log(`${LOG} estado: ${anterior} → ${nuevo}`, detalle.detalle || '');
+
+    // En cuanto el modelo decide (listo o error), el vigilante sobra.
+    if (nuevo === ESTADO_TRADUCTOR.LISTO || nuevo === ESTADO_TRADUCTOR.ERROR) pararVigilante();
+
     onEstado?.({ estado: nuevo, ...detalle });
+  }
+
+  function pararVigilante() {
+    if (vigilanteCarga === null) return;
+    clearTimeout(vigilanteCarga);
+    vigilanteCarga = null;
+  }
+
+  // Si el worker no responde nada en TIMEOUT_CARGA_MS, forzamos 'error'. Así el
+  // fallo es visible en la UI en vez de parecer una carga eterna, y las frases
+  // encoladas se resuelven en lugar de acumularse.
+  function armarVigilante() {
+    pararVigilante();
+    vigilanteCarga = setTimeout(() => {
+      vigilanteCarga = null;
+      if (estado === ESTADO_TRADUCTOR.LISTO || estado === ESTADO_TRADUCTOR.ERROR) return;
+
+      const mensaje =
+        `El traductor no terminó de cargar en ${TIMEOUT_CARGA_MS / 1000} s. ` +
+        'Revisa la consola del documento offscreen (filtra por "traductor"). ' +
+        'La transcripción sigue funcionando.';
+      console.error(`${LOG} ${mensaje}`);
+      fijarEstado(ESTADO_TRADUCTOR.ERROR, { detalle: 'Tiempo agotado al cargar el traductor.' });
+      fallarTodo('tiempo agotado al cargar el traductor');
+    }, TIMEOUT_CARGA_MS);
   }
 
   /* ---------------------- Arranque del worker --------------------- */
@@ -36,11 +76,14 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
   function iniciar({ rutaModelos, rutaWasm, modelo }) {
     if (worker) return;
 
+    console.log(`${LOG} iniciando worker`, { modelo, rutaModelos });
     fijarEstado(ESTADO_TRADUCTOR.CARGANDO, { detalle: 'Cargando traductor local…' });
+    armarVigilante();
 
     try {
       worker = new Worker(chrome.runtime.getURL(RUTA_WORKER), { type: 'module' });
     } catch (error) {
+      console.error(`${LOG} no se pudo crear el worker:`, error);
       fijarEstado(ESTADO_TRADUCTOR.ERROR, {
         detalle: `No se pudo crear el worker de traducción: ${error?.message || error}`
       });
@@ -48,7 +91,16 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
     }
 
     worker.onmessage = (evento) => manejarMensaje(evento.data || {});
+
+    // Un mensaje que no se puede deserializar dejaría al worker mudo sin avisar.
+    worker.onmessageerror = (evento) => {
+      console.error(`${LOG} mensaje ilegible del worker:`, evento);
+      fijarEstado(ESTADO_TRADUCTOR.ERROR, { detalle: 'Mensaje ilegible del worker de traducción.' });
+      fallarTodo('mensaje ilegible del worker de traducción');
+    };
+
     worker.onerror = (evento) => {
+      console.error(`${LOG} fallo del worker:`, evento?.message || evento);
       fijarEstado(ESTADO_TRADUCTOR.ERROR, {
         detalle: `Fallo en el worker de traducción: ${evento?.message || 'error desconocido'}`
       });
@@ -74,6 +126,7 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
         break;
 
       case 'LISTO':
+        console.log(`${LOG} worker listo con el modelo "${mensaje.modelo}"`);
         fijarEstado(ESTADO_TRADUCTOR.LISTO, { detalle: `Traductor listo (${mensaje.modelo})` });
         procesarCola();
         break;
@@ -88,6 +141,7 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
         break;
 
       case 'ERROR':
+        console.error(`${LOG} error del worker (fase ${mensaje.fase}):`, mensaje.error);
         if (mensaje.fase === 'carga' || mensaje.fase === 'worker') {
           fijarEstado(ESTADO_TRADUCTOR.ERROR, { detalle: traducirErrorModelo(mensaje.error) });
           fallarTodo(mensaje.error);
@@ -144,6 +198,11 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
       // Si nos quedamos atrás, soltamos lo más viejo (igual que en Whisper).
       while (cola.length > MAX_EN_COLA) {
         const viejo = cola.shift();
+        // Si esto se repite con el traductor en 'cargando', el modelo está
+        // tardando de más: el vigilante acabará cortando por lo sano.
+        console.warn(
+          `${LOG} frase #${viejo.id} descartada por cola llena (estado actual: ${estado}).`
+        );
         viejo.resolver({ traduccion: '', motivo: 'descartada por cola llena' });
       }
 
@@ -195,6 +254,7 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
   /* --------------------------- Limpieza --------------------------- */
 
   function destruir() {
+    pararVigilante();
     fallarTodo('traductor detenido');
     if (worker) {
       worker.onmessage = null;

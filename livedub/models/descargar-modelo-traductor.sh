@@ -20,10 +20,15 @@ BASE="https://huggingface.co/${REPO}/resolve/main"
 DESTINO="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/opus-mt-en-es"
 
 # Rutas RELATIVAS dentro del repo del modelo. Se respeta la estructura (onnx/).
-# Los modelos Marian suelen traer, además del tokenizer JSON, los SentencePiece
-# source.spm / target.spm y vocab.json.
+# transformers.js NO usa los SentencePiece (source.spm / target.spm) ni
+# vocab.json: le basta tokenizer.json + tokenizer_config.json. Se descargan
+# igualmente por completitud, pero están en OPCIONALES.
 ARCHIVOS=(
   "config.json"
+  # tokenizer.json es OBLIGATORIO: verificado leyendo la librería vendorizada,
+  # que hace getModelJSON(..., "tokenizer.json", fatal=true). Sin él la carga
+  # del traductor falla. Faltaba en la primera versión de este script.
+  "tokenizer.json"
   "generation_config.json"
   "tokenizer_config.json"
   "vocab.json"

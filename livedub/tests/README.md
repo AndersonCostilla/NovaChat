@@ -13,6 +13,7 @@ node livedub/tests/test-subtitulos.mjs   # persistencia de subtítulos (Bug 1)
 node livedub/tests/test-vad-corte.mjs    # corte forzado de frases largas
 node livedub/tests/test-traduccion.mjs   # traducción: heurística, cola y persistencia
 node livedub/tests/test-offscreen-apis.mjs  # APIs de chrome permitidas por contexto
+node livedub/tests/test-traductor-vigilante.mjs  # límite de tiempo de carga del traductor
 ```
 
 Cada script termina con código 0 si pasa y 1 si falla.
@@ -46,6 +47,12 @@ Cada script termina con código 0 si pasa y 1 si falla.
 > el service worker, que sí tiene esas APIs. Por eso NO detectaban este tipo de
 > fallo. Si añades código al offscreen o a un worker, ejecuta
 > `test-offscreen-apis.mjs`.
+
+- **`test-traductor-vigilante.mjs`** simula un worker de traducción **mudo**
+  (acepta el `INIT` y no contesta nunca) con un reloj falso, y comprueba que a
+  los 90 s el estado pasa solo a `error` y que ninguna frase encolada se queda
+  colgada. Verificada desactivando el vigilante: sin él, sólo 2 de 6 promesas
+  se resuelven — que es exactamente el bug que reportó Anderson.
 
 Ninguna prueba Chrome, Web Audio, WASM ni el modelo: eso sólo se
 valida a mano (ver `docs/PRUEBA-NIVEL2.md`).

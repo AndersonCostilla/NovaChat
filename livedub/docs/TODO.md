@@ -121,6 +121,32 @@ Ajustes añadidos al cerrar, a partir de los hallazgos del usuario:
   workers, **sólo `chrome.runtime`**. Cualquier otra API va a través del service
   worker. Vigilado por `tests/test-offscreen-apis.mjs`.
 
+## Fase 4 — traductor atascado en «cargando» (reporte de Anderson)
+
+Síntoma: `traductor: "cargando"` indefinidamente, badge girando, cada subtítulo
+con «Traducción no disponible (descartada por cola llena)» y **cero líneas**
+sobre el traductor en la consola del offscreen.
+
+Lo que se encontró, por orden de certeza:
+
+1. **CONFIRMADO — ceguera total por falta de instrumentación.** `traductor.js` y
+   `traductor-worker.js` tenían literalmente 0 `console.*`. La ausencia de logs
+   no era una pista sobre el worker: era un agujero nuestro. Corregido.
+2. **CONFIRMADO — `descargar-modelo-traductor.sh` no incluía `tokenizer.json`.**
+   Verificado leyendo la librería vendorizada:
+   `getModelJSON(..., "tokenizer.json", fatal=true)`. El script listaba
+   `vocab.json` + `source.spm` + `target.spm`, que transformers.js **no usa**.
+3. **CONFIRMADO — no había límite de tiempo de carga.** Un worker que no
+   contesta dejaba el estado en `cargando` para siempre y las promesas de las
+   frases encoladas colgadas. Reproducido en prueba: 2 de 6 resueltas.
+4. **NO confirmado:** la causa última de que el worker no respondiera. No se
+   puede determinar sin Chrome. El pre-chequeo de archivos y los logs nuevos lo
+   dirán en la siguiente ejecución.
+
+Descartadas con evidencia: la tarea `translation` **sí** está registrada en el
+bundle; las claves de estado de transcripción y traducción son distintas (no hay
+carrera entre módulos); el camino de publicación de estado no traga errores.
+
 ## Fase 4 — traducción inglés → español
 
 - **Estado:** código completo, **Nivel 1 verificado** (node --check, manifest,
