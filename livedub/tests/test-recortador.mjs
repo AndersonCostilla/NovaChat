@@ -95,6 +95,53 @@ comprobar('tolera entradas raras sin reventar', () => {
   }
 });
 
+console.log('\n── Regresión: las tres frases REALES que se rompieron ──');
+
+comprobar('las frases rotas en la tanda de Anderson quedan INTACTAS', () => {
+  // Capturadas en su sesión del 8-oct-2026 con el recorte encendido. No eran
+  // recortes agresivos: eran frases rotas. 'bien' y 'bueno' estaban en la
+  // lista de "muletillas de arranque" pero se aplicaban en cualquier
+  // posición, y se llevaban por delante el complemento del verbo.
+  const reales = [
+    'Se siente muy bien y de manera similar.',
+    'Se siente muy bien. Sí, creo que es importante.',
+    'Cuando entregas una cosa y es bueno. Esto es como lo esperaba.'
+  ];
+  for (const t of reales) {
+    // Incluso pidiéndole un recorte brutal, estas frases no se tocan.
+    assert.equal(recortar(t, { objetivo: 0.5 }).texto, t);
+  }
+});
+
+comprobar('ninguna frase acaba en una palabra que pide complemento', () => {
+  const sospechosas = [
+    'Se siente muy bien.',
+    'Y es bueno.',
+    'Esto es bien.',
+    'Todo está bien, de verdad.',
+    'Quedó bastante bien.'
+  ];
+  for (const t of sospechosas) {
+    const r = recortar(t, { objetivo: 0.5 }).texto;
+    assert.doesNotMatch(r, /\b(muy|tan|más|bastante|es|está|y)\s*[.!?…,]/i, `rompió: "${r}"`);
+  }
+});
+
+comprobar('las muletillas SÓLO se quitan al arrancar la oración y con coma', () => {
+  // Sí: es relleno de arranque.
+  assert.equal(recortar('Bueno, vamos a verlo ahora mismo.', { objetivo: 0.5 }).texto,
+    'Vamos a verlo ahora mismo.');
+  // No: aquí 'bueno' es el complemento, y 'de hecho' no lleva coma.
+  assert.match(recortar('El resultado es bueno y rápido.', { objetivo: 0.5 }).texto, /bueno/);
+  assert.match(recortar('Lo hizo de hecho y de derecho.', { objetivo: 0.5 }).texto, /de hecho/);
+});
+
+comprobar('una respuesta de una sola palabra no se borra', () => {
+  for (const t of ['Absolutamente.', 'Obviamente.', 'Básicamente.', 'Claramente.']) {
+    assert.equal(recortar(t, { objetivo: 0.9 }).texto, t);
+  }
+});
+
 console.log('\n── Es reversible y medible ──');
 
 comprobar('con objetivo 0 no toca nada', () => {
@@ -161,7 +208,7 @@ comprobar('sobre un lote variado, la media cae en la horquilla pedida', () => {
   assert.ok(lote.reduccionMedia >= 0.1, `media ${lote.reduccionMedia}`);
   assert.ok(lote.reduccionMedia <= 0.25, `media ${lote.reduccionMedia}`);
   assert.ok(lote.segundosAhorrados > 0);
-  assert.equal(lote.frasesSinTocar, 2); // "Gracias." y "Esto es increíble."
+  assert.equal(lote.frasesSinTocar, 3); // "Gracias.", "Esto es increíble." y la de "el hecho de que"
 });
 
 comprobar('la proporción 1,11 baja por debajo de 1', () => {

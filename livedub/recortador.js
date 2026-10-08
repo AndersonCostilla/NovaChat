@@ -136,13 +136,29 @@ const NIVEL_1 = [
   ['lo que quiero decir es que', '']
 ];
 
-/** NIVEL 2 — Muletillas de arranque. OPUS-MT las calca del inglés. */
+/**
+ * NIVEL 2 — Muletillas DE ARRANQUE. OPUS-MT las calca del inglés.
+ *
+ * FALLO GRAVE CORREGIDO EL 8-OCT-2026. Esta lista siempre dijo "de arranque",
+ * pero se aplicaba en CUALQUIER posición de la frase. Con eso, 'bien' y
+ * 'bueno' se borraban también cuando eran el complemento del verbo, y
+ * destrozaron frases reales de Anderson:
+ *
+ *   "Se siente muy bien y de manera similar"   ->  "Se siente muy y de manera similar"
+ *   "Se siente muy bien. Sí, creo que..."      ->  "Se siente muy. Sí, creo que..."
+ *   "...entregas una cosa y es bueno. Esto..." ->  "...entregas una cosa y es. Esto..."
+ *
+ * No eran recortes agresivos: eran frases rotas. Ahora estas reglas SÓLO
+ * disparan al principio de una oración y seguidas de coma, que es como
+ * aparece una muletilla de verdad ("Bueno, ..."). Y las más ambiguas
+ * —'bien', 'vale', 'sabes', 'la verdad', 'pues'— se han quitado del todo:
+ * aunque vayan al principio, muchas veces no son relleno.
+ */
 const NIVEL_2 = [
   ['bueno', ''],
   ['así que', ''],
   ['ya sabes', ''],
   ['ya sabéis', ''],
-  ['sabes', ''],
   ['quiero decir', ''],
   ['o sea', ''],
   ['de hecho', ''],
@@ -153,18 +169,13 @@ const NIVEL_2 = [
   ['sinceramente', ''],
   ['honestamente', ''],
   ['francamente', ''],
-  ['la verdad', ''],
   ['por supuesto', ''],
   ['en realidad', ''],
   ['digamos', ''],
   ['mira', ''],
   ['oye', ''],
-  ['vale', ''],
-  ['bien', ''],
-  ['ahora bien', ''],
   ['dicho esto', ''],
-  ['en fin', ''],
-  ['pues', '']
+  ['en fin', '']
 ];
 
 /** NIVEL 3 — Intensificadores vacíos dentro de la frase. */
@@ -206,7 +217,69 @@ function compilar(reglas) {
   }));
 }
 
-const NIVELES = [compilar(NIVEL_1), compilar(NIVEL_2), compilar(NIVEL_3)];
+/**
+ * RED DE SEGURIDAD. Después de aplicar una regla, ¿la frase sigue siendo una
+ * frase?
+ *
+ * Esto NO sustituye a escribir bien las reglas: es lo que tiene que cazar la
+ * próxima regla mal escrita antes de que llegue a los oídos de nadie. Si una
+ * regla no pasa por aquí, se descarta ESA regla y el texto se queda como
+ * estaba. El recorte es opcional; la frase correcta no.
+ */
+const FINAL_COJO =
+  /(?:^|\s)(?:es|era|fue|son|eran|está|están|ser|sea|muy|tan|más|mas|menos|bastante|demasiado|casi|de|del|al|a|en|con|por|para|sin|sobre|y|e|o|u|que|lo|la|el|los|las|un|una)\s*[.!?…,]/i;
+
+function oraciones(t) {
+  return t.split(/(?<=[.!?…])\s+/).filter((o) => o.trim());
+}
+
+function esSeguro(nuevo, previo) {
+  if (!nuevo.trim()) return false;
+  // Una oración que se queda en una sola palabra donde antes había varias.
+  const minimas = (t) => oraciones(t).filter((o) => o.trim().split(/\s+/).length < 2).length;
+  if (minimas(nuevo) > minimas(previo)) return false;
+  // Una frase que corta en una palabra que pedía algo detrás:
+  // "se siente muy.", "y es.", "una cosa y es, ...".
+  if (FINAL_COJO.test(nuevo) && !FINAL_COJO.test(previo)) return false;
+  return true;
+}
+
+// Palabras que EXIGEN un complemento detrás. Si se borra lo que viene
+// después, la frase queda coja: "se siente muy ___", "y es ___". Ninguna
+// regla de BORRADO puede dispararse justo detrás de una de éstas.
+const EXIGEN_COMPLEMENTO = [
+  'muy', 'tan', 'más', 'mas', 'menos', 'bastante', 'demasiado', 'casi', 'poco', 'qué',
+  'es', 'era', 'fue', 'son', 'eran', 'fueron', 'está', 'estaba', 'están', 'estaban',
+  'ser', 'sea', 'sido', 'parece', 'parecía', 'resulta', 'queda', 'suena', 'siente',
+  'sientes', 'sentía', 'estoy', 'estás', 'soy', 'eres', 'somos'
+];
+const GUARDA_IZQ = `(?<!(?:${EXIGEN_COMPLEMENTO.join('|')})\\s)`;
+
+// Arranque de oración: principio del texto, o detrás de . ! ? … y espacio.
+const ARRANQUE = '(?<=^|[.!?…]\\s)';
+
+/** Nivel 2: sólo al arrancar una oración Y seguida de coma. */
+function compilarNivel2(reglas) {
+  return reglas.map(([de, a]) => ({
+    de,
+    a,
+    patron: new RegExp(`${ARRANQUE}${escapar(de)},\\s*`, 'gi')
+  }));
+}
+
+/** Nivel 3: borrados, con la guarda de "no detrás de muy/es/...". */
+function compilarConGuarda(reglas) {
+  return reglas.map(([de, a]) => ({
+    de,
+    a,
+    patron: new RegExp(
+      `${a === '' ? GUARDA_IZQ : ''}${LIMITE_IZQ}${escapar(de)}${LIMITE_DER}`,
+      'gi'
+    )
+  }));
+}
+
+const NIVELES = [compilar(NIVEL_1), compilarNivel2(NIVEL_2), compilarConGuarda(NIVEL_3)];
 
 /**
  * Deja el texto presentable después de borrar trozos: espacios dobles,
@@ -255,8 +328,11 @@ function aplicar(texto, reglas, { objetivoCaracteres }) {
   for (const regla of reglas) {
     if (t.length <= objetivoCaracteres) break;
     const antes = t;
-    t = t.replace(regla.patron, regla.a);
-    if (t !== antes) usadas.push(regla.de);
+    const candidato = t.replace(regla.patron, regla.a);
+    if (candidato === antes) continue;
+    if (!esSeguro(candidato, antes)) continue; // la regla se descarta, no la frase
+    t = candidato;
+    usadas.push(regla.de);
   }
   return { texto: t, usadas };
 }

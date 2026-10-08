@@ -1,134 +1,114 @@
 # Recorte de traducciones (opción A) — ejemplos antes/después
 
-**Fecha:** 8-oct-2026 · **El recorte está APAGADO.** No se activa hasta que lo
-digas. Se enciende con `livedub.recorte(true)` y se apaga con `livedub.recorte(false)`,
-en caliente y sin recargar nada.
+**Última revisión: 8-oct-2026, tras romper tres frases reales.**
+**El recorte está APAGADO.** Se enciende con `livedub.recorte(true)` y se apaga
+con `livedub.recorte(false)`, en caliente y sin recargar nada.
 
 ---
 
-## Por qué se recorta
+## Lo primero: el fallo que encontraste
 
-La proporción medida en dos tandas independientes es **1,11**: el doblaje en
-español dura un 11 % más que el original en inglés. Ese número es **toda** la
-causa de la pérdida estructural. Está demostrado en `cronometro.js` que con
-Whisper y la traducción a 0 ms la ocupación sale **idéntica**: no es velocidad
-de cálculo, es la proporción entre los dos idiomas.
+Las tres frases que capturaste no eran recortes agresivos. Eran **frases rotas**:
 
-```
-1,11 × (1 − 0,12) = 0,977   →  por debajo de 1, la pérdida estructural desaparece
-```
+| Lo que dijo el vídeo | Lo que salió por el altavoz |
+|---|---|
+| Se siente muy **bien** y de manera similar | «Se siente muy y de manera similar» |
+| Se siente muy **bien**. Sí, creo que… | «Se siente muy. Sí, creo que…» |
+| …entregas una cosa y es **bueno**. Esto es… | «…entregas una cosa y es. Esto es…» |
 
-Por eso el objetivo es **12 %**, el centro de la horquilla que pediste.
+**Causa, y es un fallo mío de bulto.** La lista de nivel 2 se llama «muletillas
+**de arranque**» desde que la escribí, pero el código la aplicaba **en cualquier
+posición de la frase**. Así que `bien` y `bueno` se borraban también cuando eran
+el complemento del verbo, no relleno. El comentario decía una cosa y el código
+hacía otra.
 
-## Qué hace y qué NO hace
+### Qué he cambiado, en tres capas
 
-**Sí:** cambia maneras largas de decir lo mismo por maneras cortas.
-**No:** resumir, omitir frases ni decidir qué es importante. Si con las reglas
-no llega al objetivo, **se queda corto y lo dice**, en vez de empezar a tirar
-contenido por su cuenta.
+**1. Las muletillas sólo disparan al arrancar una oración y seguidas de coma.**
+Que es como aparece una muletilla de verdad: «Bueno, …». Nunca en medio.
 
-Se para **en cuanto alcanza el objetivo**, regla a regla: una frase que ya cabe
-en su hueco no se toca. Cada rodeo que se quita de más es una oportunidad de
-más de estropear algo.
+**2. Las cinco más ambiguas se han quitado del todo** — `bien`, `vale`, `sabes`,
+`la verdad`, `pues` — porque aunque vayan al principio, muchas veces no son
+relleno.
 
----
+**3. Una red de seguridad que no existía.** Ahora, después de aplicar **cada**
+regla, se comprueba si el resultado sigue siendo una frase: que ninguna oración
+se quede en una sola palabra, y que ninguna termine o corte en una palabra que
+pide complemento (`muy`, `tan`, `es`, `está`, `y`, `de`…). **Si una regla no
+pasa, se descarta esa regla, no la frase.**
 
-## Los 10 ejemplos
+Las dos primeras arreglan el fallo concreto. **La tercera es la que importa:**
+es la que tiene que cazar la próxima regla mal escrita antes de que llegue a tus
+oídos. Es la segunda tanda de reglas mías que rompe español, así que el problema
+no era esa regla, era que no había nadie vigilando.
 
-> **Honestidad sobre el origen.** No son frases de tus tandas: las traducciones
-> reales nunca se guardaron en el repo, sólo las tablas de tiempos. Éstas son
-> construcciones típicas de OPUS-MT que **yo** he escrito, y por eso están
-> cargadas de rodeos a propósito. **La cifra real de tu vídeo será más baja.**
-> Para verla con tus frases, hay un comando nuevo: `livedub.recorteEjemplos()`,
-> que pasa el recortador por las traducciones que el cronómetro tenga guardadas
-> de la sesión en curso. Eso sí son tus frases.
-
-| # | ANTES (lo que sale hoy de OPUS-MT) | DESPUÉS (con recorte) | −% | s |
-|---|---|---|---|---|
-| 1 | Bueno, en este momento vamos a hablar sobre la razón por la que esto sucede. | Bueno, **ahora** vamos a hablar sobre la razón por la que esto sucede. | 13,2 % | 0,58 |
-| 2 | A pesar de que el sistema es capaz de llevar a cabo la tarea, el resultado es peor. | **Aunque** el sistema **puede** llevar a cabo la tarea, el resultado es peor. | 16,9 % | 0,81 |
-| 3 | De acuerdo con el informe, la mayor parte de los usuarios usa la aplicación a diario. | **Según** el informe, **la mayoría de** los usuarios usa la aplicación a diario. | 15,3 % | 0,76 |
-| 4 | Hoy en día, debido a que la memoria es limitada, hay que tener mucho cuidado con esto. | **Hoy**, **porque** la memoria es limitada, hay que tener mucho cuidado con esto. | 15,1 % | 0,76 |
-| 5 | Lo que quiero decir es que el hecho de que funcione no significa que sea bueno. | El hecho de que funcione no significa que sea bueno. | 34,2 % | 1,57 |
-| 6 | Sin embargo, con el fin de entenderlo, tenemos que ver de qué manera se comporta. | Sin embargo, **para** entenderlo, tenemos que ver de qué manera se comporta. | 11,1 % | 0,52 |
-| 7 | En el caso de que no funcione, por lo tanto, vamos a tener que hacer uno nuevo. | En el caso de que no funcione, vamos a tener que hacer uno nuevo. | 17,7 % | 0,81 |
-| 8 | Y básicamente, ya sabes, esto es realmente una gran cantidad de trabajo. | Y básicamente, ya sabes, esto es realmente **un montón de** trabajo. | 11,1 % | 0,47 |
-| 9 | Gracias por ver el vídeo. | *(sin cambios)* | 0 % | 0 |
-| 10 | Esto es increíble. | *(sin cambios)* | 0 % | 0 |
-
-**Media: 15,8 % · 6,28 s ahorrados en 10 frases · 2 frases no se tocaron.**
-
-**El 15,8 % se pasa un poco de la horquilla**, y es por la #5: `lo que quiero
-decir es que` se va entera y se lleva un 34 % de una sola vez. Si prefieres
-quedarte dentro del 10-15 %, se baja el objetivo con
-`livedub.recorteObjetivo(0.10)`, o se quita esa regla.
-
-### Lo que me gusta menos de esta tabla
-
-La **#5**. El resultado es correcto y hasta mejor español, pero es la única
-donde el recorte **borra** en vez de **sustituir**. Las demás cambian una
-palabra por otra más corta y son difíciles de discutir. Si te chirría, dilo y
-quito el nivel 2 entero (muletillas): se pierde algo de ahorro pero el recorte
-queda reducido a puras equivalencias.
+Tus tres frases están ahora **como casos de prueba fijos** en
+`tests/test-recortador.mjs`, con el texto exacto. Si vuelven a romperse, la
+suite se pone roja.
 
 ---
 
-## Dos reglas que escribí, probé y tuve que quitar
+## Los 10 ejemplos, regenerados
 
-Al generar esta tabla salieron dos frases rotas. No las dejo pasar y las anoto
-aquí para que no vuelvan por descuido (hay una comprobación en
-`tests/test-recortador.mjs` que las caza si alguien las repone):
+Las tres primeras son **tus frases reales**. El resto son construcciones típicas
+de OPUS-MT escritas por mí.
 
-| Regla | Lo que producía | Por qué está mal |
+| # | ANTES | DESPUÉS | −% |
+|---|---|---|---|
+| 1 | Se siente muy bien y de manera similar. | **(sin cambios)** | 0 % |
+| 2 | Se siente muy bien. Sí, creo que es importante. | **(sin cambios)** | 0 % |
+| 3 | Cuando entregas una cosa y es bueno. Esto es como lo esperaba. | **(sin cambios)** | 0 % |
+| 4 | **Bueno,** **en este momento** vamos a hablar sobre la razón por la que esto sucede. | **Ahora** vamos a hablar sobre la razón por la que esto sucede. | 13,2 % |
+| 5 | **A pesar de que** el sistema **es capaz de** llevar a cabo la tarea, el resultado es peor. | **Aunque** el sistema **puede** llevar a cabo la tarea, el resultado es peor. | 16,9 % |
+| 6 | **De acuerdo con** el informe, **la mayor parte de** los usuarios usa la aplicación a diario. | **Según** el informe, **la mayoría de** los usuarios usa la aplicación a diario. | 15,3 % |
+| 7 | **Hoy en día**, **debido a que** la memoria es limitada, hay que tener mucho cuidado con esto. | **Hoy**, **porque** la memoria es limitada, hay que tener mucho cuidado con esto. | 15,1 % |
+| 8 | Sin embargo, **con el fin de** entenderlo, tenemos que ver de qué manera se comporta. | Sin embargo, **para** entenderlo, tenemos que ver de qué manera se comporta. | 11,1 % |
+| 9 | Y básicamente, ya sabes, esto es realmente **una gran cantidad de** trabajo. | Y básicamente, ya sabes, esto es realmente **un montón de** trabajo. | 11,1 % |
+| 10 | Gracias por ver el vídeo. | **(sin cambios)** | 0 % |
+
+**Media: 10,2 % · 3,9 s ahorrados · 4 de 10 frases no se tocaron.**
+
+### El coste de haberlo arreglado, dicho claro
+
+La media baja de **15,8 % a 10,2 %**. Está en el borde bajo de tu horquilla
+(10-15 %) y **deja menos margen**: `1,11 × 0,898 = 0,997`. Sigue por debajo de
+1, pero por los pelos.
+
+Eso significa que **el recorte por sí solo quizá no baje la pérdida tanto como
+esperábamos**. Lo prefiero así: una media alta conseguida rompiendo frases no
+vale nada. Si al medir resulta que no basta, hay margen para añadir reglas
+nuevas — pero ahora pasan primero por la red de seguridad.
+
+---
+
+## Reglas probadas y descartadas
+
+Ninguna de éstas volverá por descuido: hay comprobaciones que las cazan.
+
+| Regla | Producía | Por qué está mal |
 |---|---|---|
-| `en el caso de que` → `si` | «**Si no funcione**, vamos a…» | `si` pide indicativo; `en el caso de que`, subjuntivo |
-| `el hecho de que` → `que` | «es **que funcione** no significa…» | se come el sujeto de la oración |
-| `es necesario que` → `hay que` | «**hay que vayas**» | `hay que` va con infinitivo |
-| `de manera que` → `así que` | — | cambia finalidad por consecuencia |
-| `una gran cantidad de` → `muchos` | «**muchos personas**» | concordancia de género |
+| `bien` / `bueno` en cualquier posición | «Se siente muy» | se comía el complemento del verbo |
+| `vale`, `sabes`, `la verdad`, `pues` | — | ambiguas: muchas veces no son relleno |
+| `en el caso de que` → `si` | «Si no funcione» | `si` pide indicativo |
+| `el hecho de que` → `que` | «es que funcione no significa» | se comía el sujeto |
+| `es necesario que` → `hay que` | «hay que vayas» | va con infinitivo |
+| `de manera que` → `así que` | — | finalidad ≠ consecuencia |
+| `una gran cantidad de` → `muchos` | «muchos personas» | concordancia de género |
 
-Las cinco ahorraban tiempo y las cinco producían español incorrecto.
-**Una regla que rompe la frase no vale ningún segundo.**
-
----
-
-## Cómo probarlo tú
-
-```
-cd /c/Users/Janus/Desktop/NovaChat
-git pull origin arena/5e149d9c-novachat
-```
-
-Recarga la extensión, pon un vídeo y deja correr 2-3 minutos. Luego, en la
-consola del documento offscreen:
-
-```js
-livedub.recorteEjemplos()      // antes/después con TUS frases
-```
-
-Lee los DESPUÉS **en voz alta**. Si alguno suena mal o pierde algo, pégame la
-fila y quito esa regla. Cuando te convenza:
-
-```js
-livedub.recorte(true)          // enciende el recorte
-livedub.recorte(false)         // y lo apaga, si no te gusta cómo suena
-livedub.recorteObjetivo(0.10)  // recortar menos
-```
-
-El recorte **no toca nada más de la tubería**: con él apagado, el texto pasa
-tal cual, exactamente como hoy.
+**Todas ahorraban tiempo y todas producían español incorrecto.**
+Una regla que rompe la frase no vale ningún segundo.
 
 ---
 
 ## Detalle técnico
 
-- **Dónde:** `recortador.js`, un archivo nuevo. Se aplica en `offscreen.js`
-  después de traducir y antes de hablar.
-- **El subtítulo enseña el MISMO texto que se pronuncia.** Si la voz dijera una
-  cosa y el subtítulo otra, no sabrías a cuál creer. La traducción sin recortar
-  se guarda en el cronómetro para poder auditarla.
+- **Dónde:** `recortador.js`. Se aplica en `offscreen.js` después de traducir y
+  antes de hablar.
+- **El subtítulo enseña el MISMO texto que se pronuncia.**
 - **Tres niveles**, de menos a más invasivo: (1) perífrasis, (2) muletillas de
-  arranque, (3) intensificadores vacíos. Sólo se sube de nivel si el anterior
-  no ha bastado.
-- **Los segundos ahorrados** salen de la velocidad medida de tu voz del sistema:
-  **17,2 caracteres por segundo**. No es una estimación inventada.
+  arranque *(ancladas al principio de oración)*, (3) intensificadores vacíos
+  *(con guarda de palabra anterior)*. Sólo se sube de nivel si el anterior no
+  ha bastado, y se para **en cuanto** se alcanza el objetivo.
+- **Los segundos ahorrados** salen de la velocidad medida de tu voz:
+  **17,2 caracteres por segundo**.
+- Para verlo con **tus** frases: `livedub.recorteEjemplos()`.
