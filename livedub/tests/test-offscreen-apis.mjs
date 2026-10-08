@@ -15,13 +15,20 @@ const comprobar = (nombre, ok, extra = '') => {
 console.log('1) APIs de chrome usadas en los contextos restringidos');
 
 const fs = await import('node:fs');
-const ARCHIVOS_OFFSCREEN = ['../offscreen.js', '../transcriptor.js', '../traductor.js'];
+const ARCHIVOS_OFFSCREEN = [
+  '../offscreen.js',
+  '../transcriptor.js',
+  '../traductor.js',
+  '../sintetizador.js',
+  '../reproductor-doblaje.js'
+];
 const ARCHIVOS_WORKER = [
   '../transcriptor-worker.js',
   '../traductor-worker.js',
   '../vad-processor.js',
   '../segmentador.js', // se carga dentro del worker de traducción
-  '../terminos-protegidos.js' // idem
+  '../terminos-protegidos.js', // idem
+  '../sintetizador-worker.js'
 ];
 
 function apisUsadas(ruta) {

@@ -31,6 +31,9 @@
           <span id="estadoTraductor" class="modelo modelo--inactivo" title="Modelo de traducción">
             Traductor inactivo
           </span>
+          <span id="estadoVoz" class="modelo modelo--inactivo" title="Modelo de voz (doblaje)">
+            Voz inactiva
+          </span>
         </div>
       </div>
       <ul id="listaSubtitulos" class="subtitulos">
@@ -41,6 +44,16 @@
     <section class="bloque">
       <label class="campo">
         <span>Idioma origen</span>
+        <label class="interruptor">
+          <input type="checkbox" id="doblajeVoz" />
+          <span>Leer traducción en voz alta</span>
+        </label>
+        <p class="ayuda">
+          Genera la voz en español y baja el volumen del vídeo mientras habla.
+          Añade unos segundos de retardo y consume CPU: déjalo apagado si sólo
+          quieres subtítulos.
+        </p>
+
         <select id="idiomaOrigen">
           <option value="auto">Detectar automáticamente</option>
           <option value="es">Español</option>

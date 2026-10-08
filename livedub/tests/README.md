@@ -16,6 +16,7 @@ node livedub/tests/test-offscreen-apis.mjs  # APIs de chrome permitidas por cont
 node livedub/tests/test-traductor-vigilante.mjs  # límite de tiempo de carga del traductor
 node livedub/tests/test-segmentador.mjs  # troceo en oraciones y truncamiento de OPUS-MT
 node livedub/tests/test-terminos-protegidos.mjs  # nombres propios que no se traducen
+node livedub/tests/test-doblaje.mjs  # síntesis de voz, cola y ducking
 ```
 
 Cada script termina con código 0 si pasa y 1 si falla.
@@ -68,6 +69,13 @@ Cada script termina con código 0 si pasa y 1 si falla.
   el modo estricto (`meta` minúscula no se toca, `Meta` sí), marcadores
   maltratados por el modelo, y el caso en que el marcador desaparece: entonces
   se informa y **no se inventa** el término.
+
+- **`test-doblaje.mjs`** cubre la Fase 5 con un `AudioContext` simulado:
+  comprueba que el audio original baja al 18 % cuando empieza el doblaje,
+  vuelve a su nivel al terminar, **no sube entre dos frases encadenadas**
+  (efecto bombeo) y se restaura al parar o al apagar el interruptor. También
+  prueba el vigilante de 90 s del sintetizador y que las tres claves de estado
+  de módulo son distintas.
 
 Ninguna prueba Chrome, Web Audio, WASM ni el modelo: eso sólo se
 valida a mano (ver `docs/PRUEBA-NIVEL2.md`).

@@ -24,6 +24,9 @@ export const MSG = {
   // popup -> background
   GET_SUBTITLES: 'GET_SUBTITLES',         // historial + estado del modelo al abrir
 
+  // popup -> background -> offscreen: activar o desactivar el doblaje por voz.
+  SET_DOBLAJE: 'SET_DOBLAJE',
+
   // offscreen -> background: el offscreen NO puede usar chrome.storage,
   // así que pide las preferencias por mensaje.
   GET_SETTINGS: 'GET_SETTINGS',
@@ -74,13 +77,16 @@ export const ESTADO_MODELO_UI = {
   LISTO: 'listo',
   TRANSCRIBIENDO: 'transcribiendo',
   TRADUCIENDO: 'traduciendo',
+  SINTETIZANDO: 'sintetizando', // Fase 5: generando la voz
+  HABLANDO: 'hablando', // Fase 5: reproduciendo el doblaje
   ERROR: 'error'
 };
 
-// Los dos módulos de IA son independientes: si uno falla, el otro sigue.
+// Los tres módulos de IA son independientes: si uno falla, los otros siguen.
 export const MODULO = {
   TRANSCRIPCION: 'transcripcion',
-  TRADUCCION: 'traduccion'
+  TRADUCCION: 'traduccion',
+  SINTESIS: 'sintesis'
 };
 
 export const ESTADO_SESION = {
@@ -93,7 +99,18 @@ export const ESTADO_SESION = {
 export const CLAVE_SUBTITULOS = 'livedub.subtitulos';
 export const CLAVE_MODELO = 'livedub.modelo'; // estado del modelo de transcripción
 export const CLAVE_TRADUCTOR = 'livedub.traductor'; // estado del modelo de traducción
+export const CLAVE_SINTETIZADOR = 'livedub.sintetizador'; // estado del modelo de voz
 export const MAX_SUBTITULOS = 20; // cuántas frases guardamos como historial
 
 // Clave usada en chrome.storage.local para las preferencias de idioma.
 export const CLAVE_IDIOMAS = 'livedub_idiomas';
+
+// Fase 5. Preferencias del doblaje por voz, en chrome.storage.local.
+export const CLAVE_DOBLAJE = 'livedub_doblaje';
+
+// Volumen al que baja el audio ORIGINAL mientras habla el doblaje, y tiempo de
+// la rampa. 0.18 = 18 %: se sigue oyendo de fondo sin pisar a la voz.
+export const DUCKING = {
+  NIVEL: 0.18,
+  RAMPA_S: 0.25 // rampa suave, nada de cortes bruscos
+};

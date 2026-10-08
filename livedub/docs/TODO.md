@@ -1,3 +1,43 @@
+# TODO y hallazgos
+
+## Fase 5 — voz en español + ducking (ENTREGADA, Nivel 2 pendiente)
+
+**Modelo elegido: `Xenova/mms-tts-spa` (MMS-TTS, arquitectura VITS), ~38 MB.**
+
+Criterio de la decisión, verificado leyendo el bundle vendorizado:
+
+| Candidato | Veredicto |
+|---|---|
+| **MMS-TTS / VITS** | ✅ El bundle ya registra la tarea `text-to-speech` y la clase `VitsModel`. Cero dependencias nuevas |
+| Piper TTS | ❌ Necesita `piper-phonemize` + espeak-ng en WebAssembly: un segundo stack entero |
+| SpeechT5 | ❌ Soportado, pero **sólo inglés**, y además pide vocoder y *speaker embeddings* |
+| Coqui / Bark | ❌ Demasiado pesados; Bark ni está en el bundle |
+
+VITS es de **una sola pieza**: `_call_text_to_waveform` devuelve
+`{ audio, sampling_rate }` sin vocoder. Por eso su carpeta tiene **un solo
+`.onnx`**, no encoder + decoder como OPUS-MT.
+
+Arquitectura, idéntica al patrón de las fases 3 y 4:
+`sintetizador-worker.js` (tercer worker independiente, con pre-chequeo de
+archivos) → `sintetizador.js` (fachada con cola y vigilante de 90 s) →
+`reproductor-doblaje.js` (reproducción y ducking) → `offscreen.js`.
+
+Decisiones que conviene recordar:
+
+- **El modelo de voz sólo se carga si el usuario marca la casilla.** No tiene
+  sentido gastar 38 MB y CPU si sólo quiere subtítulos.
+- **La síntesis NO bloquea la publicación del subtítulo.** El texto aparece
+  cuanto antes y la voz llega después.
+- **Cola de voz muy corta (2).** Un doblaje que va diez frases por detrás no
+  sirve: mejor descartar que acumular.
+- **Al encadenar dos frases no se levanta el volumen entre medias**, para
+  evitar el efecto «bombeo».
+- **`claveDeModulo` pasó a ser un mapa explícito.** Con el ternario anterior, el
+  estado de síntesis habría ido a parar a la clave de Whisper y habría pisado
+  el estado de la transcripción. Detectado al integrar, cubierto por prueba.
+
+Pendiente de Nivel 2: `docs/PRUEBA-NIVEL2-FASE5.md`.
+
 # TODO / deuda técnica de LiveDub
 
 Registro de cosas detectadas y conscientemente aplazadas.

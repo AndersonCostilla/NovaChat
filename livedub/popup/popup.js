@@ -11,6 +11,7 @@ import {
   CLAVE_SUBTITULOS,
   CLAVE_MODELO,
   CLAVE_TRADUCTOR,
+  CLAVE_SINTETIZADOR,
   MAX_SUBTITULOS,
   MODULO
 } from '../messages.js';
@@ -23,6 +24,8 @@ const elDestino = document.getElementById('idiomaDestino');
 const elListaSubtitulos = document.getElementById('listaSubtitulos');
 const elEstadoModelo = document.getElementById('estadoModelo');
 const elEstadoTraductor = document.getElementById('estadoTraductor');
+const elEstadoVoz = document.getElementById('estadoVoz');
+const elDoblaje = document.getElementById('doblajeVoz');
 
 let estadoActual = ESTADO.INACTIVO;
 
@@ -170,13 +173,29 @@ const ETIQUETAS_MODELO = {
     listo: 'Traductor listo',
     traduciendo: 'Traduciendo…',
     error: 'Traductor no disponible'
+  },
+  [MODULO.SINTESIS]: {
+    inactivo: 'Voz inactiva',
+    cargando: 'Cargando voz…',
+    listo: 'Voz lista',
+    sintetizando: 'Generando voz…',
+    hablando: 'Hablando…',
+    error: 'Voz no disponible'
   }
 };
 
+// Cada módulo pinta en SU insignia. Un mapa explícito evita el encadenado de
+// ternarios, que ya iba a tres niveles.
+const INSIGNIA_POR_MODULO = {
+  [MODULO.TRANSCRIPCION]: elEstadoModelo,
+  [MODULO.TRADUCCION]: elEstadoTraductor,
+  [MODULO.SINTESIS]: elEstadoVoz
+};
+
 function pintarEstadoModelo(info, modulo = MODULO.TRANSCRIPCION) {
-  const elemento = modulo === MODULO.TRADUCCION ? elEstadoTraductor : elEstadoModelo;
+  const elemento = INSIGNIA_POR_MODULO[modulo] ?? elEstadoModelo;
   const estado = info?.estado || 'inactivo';
-  const etiquetas = ETIQUETAS_MODELO[modulo];
+  const etiquetas = ETIQUETAS_MODELO[modulo] ?? ETIQUETAS_MODELO[MODULO.TRANSCRIPCION];
 
   const texto =
     estado === 'cargando' && info?.detalle ? info.detalle : etiquetas[estado] ?? etiquetas.inactivo;
@@ -202,6 +221,7 @@ async function cargarHistorial() {
       pintarSubtitulos();
       pintarEstadoModelo(panel.modelo, MODULO.TRANSCRIPCION);
       pintarEstadoModelo(panel.traductor, MODULO.TRADUCCION);
+      pintarEstadoModelo(panel.sintetizador, MODULO.SINTESIS);
       return;
     }
   } catch (error) {
@@ -215,7 +235,7 @@ async function cargarHistorial() {
   }
 
   try {
-    const datos = await chrome.storage.session.get([CLAVE_SUBTITULOS, CLAVE_MODELO, CLAVE_TRADUCTOR]);
+    const datos = await chrome.storage.session.get([CLAVE_SUBTITULOS, CLAVE_MODELO, CLAVE_TRADUCTOR, CLAVE_SINTETIZADOR]);
     subtitulos = Array.isArray(datos?.[CLAVE_SUBTITULOS]) ? datos[CLAVE_SUBTITULOS] : [];
     pintarSubtitulos();
     pintarEstadoModelo(datos?.[CLAVE_MODELO], MODULO.TRANSCRIPCION);
@@ -350,6 +370,7 @@ chrome.runtime.onMessage.addListener((mensaje) => {
 
 (async function inicializar() {
   await cargarIdiomas();
+  await cargarInterruptorDoblaje();
   await cargarHistorial();
   try {
     const estado = await chrome.runtime.sendMessage({

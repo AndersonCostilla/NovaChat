@@ -17,6 +17,8 @@ import {
   CLAVE_ESTADO_SESION,
   ESTADO_SESION,
   CLAVE_IDIOMAS,
+  CLAVE_DOBLAJE,
+  CLAVE_SINTETIZADOR,
   CLAVE_SUBTITULOS,
   CLAVE_MODELO,
   CLAVE_TRADUCTOR,
@@ -90,8 +92,16 @@ async function agregarSubtitulo(subtitulo) {
 
 // Hay dos módulos de IA (transcripción y traducción) con estados separados:
 // cada uno vive en su propia clave y el popup pinta dos indicadores.
+// Cada módulo tiene SU clave. Si dos compartieran clave, el estado de uno
+// pisaría al del otro y la "degradación independiente" dejaría de serlo.
+const CLAVES_POR_MODULO = {
+  [MODULO.TRANSCRIPCION]: CLAVE_MODELO,
+  [MODULO.TRADUCCION]: CLAVE_TRADUCTOR,
+  [MODULO.SINTESIS]: CLAVE_SINTETIZADOR
+};
+
 function claveDeModulo(modulo) {
-  return modulo === MODULO.TRADUCCION ? CLAVE_TRADUCTOR : CLAVE_MODELO;
+  return CLAVES_POR_MODULO[modulo] ?? CLAVE_MODELO;
 }
 
 async function fijarEstadoModelo(info, modulo = MODULO.TRANSCRIPCION) {
@@ -107,11 +117,17 @@ async function fijarEstadoModelo(info, modulo = MODULO.TRANSCRIPCION) {
 }
 
 async function leerPanel() {
-  const datos = await chrome.storage.session.get([CLAVE_SUBTITULOS, CLAVE_MODELO, CLAVE_TRADUCTOR]);
+  const datos = await chrome.storage.session.get([
+    CLAVE_SUBTITULOS,
+    CLAVE_MODELO,
+    CLAVE_TRADUCTOR,
+    CLAVE_SINTETIZADOR
+  ]);
   return {
     subtitulos: Array.isArray(datos?.[CLAVE_SUBTITULOS]) ? datos[CLAVE_SUBTITULOS] : [],
     modelo: datos?.[CLAVE_MODELO] || { estado: ESTADO_MODELO_UI.INACTIVO, detalle: '' },
-    traductor: datos?.[CLAVE_TRADUCTOR] || { estado: ESTADO_MODELO_UI.INACTIVO, detalle: '' }
+    traductor: datos?.[CLAVE_TRADUCTOR] || { estado: ESTADO_MODELO_UI.INACTIVO, detalle: '' },
+    sintetizador: datos?.[CLAVE_SINTETIZADOR] || { estado: ESTADO_MODELO_UI.INACTIVO, detalle: '' }
   };
 }
 
@@ -121,6 +137,24 @@ async function leerPanel() {
 // Un documento offscreen sólo tiene acceso a chrome.runtime; cualquier otra
 // API de extensión llega como undefined. Por eso el service worker hace de
 // intermediario también para las preferencias.
+
+// Fase 5: preferencia del doblaje por voz. Vive aquí por lo mismo que los
+// idiomas: el offscreen no puede leer chrome.storage.
+async function leerDoblaje() {
+  const datos = await chrome.storage.local.get(CLAVE_DOBLAJE);
+  return Boolean(datos?.[CLAVE_DOBLAJE]);
+}
+
+async function guardarDoblaje(activo) {
+  await chrome.storage.local.set({ [CLAVE_DOBLAJE]: Boolean(activo) });
+  // Avisamos al offscreen para que lo aplique en caliente.
+  chrome.runtime
+    .sendMessage({ type: MSG.SET_DOBLAJE, target: TARGET.OFFSCREEN, activo: Boolean(activo) })
+    .catch(() => {
+      /* no hay offscreen abierto: no es un error */
+    });
+  return { ok: true, activo: Boolean(activo) };
+}
 
 async function leerIdiomas() {
   const datos = await chrome.storage.local.get(CLAVE_IDIOMAS);
@@ -307,6 +341,7 @@ async function detenerCaptura() {
     // El offscreen se está cerrando y ya no puede avisar de su propio estado.
     await fijarEstadoModelo({ estado: ESTADO_MODELO_UI.INACTIVO }, MODULO.TRANSCRIPCION).catch(() => {});
     await fijarEstadoModelo({ estado: ESTADO_MODELO_UI.INACTIVO }, MODULO.TRADUCCION).catch(() => {});
+    await fijarEstadoModelo({ estado: ESTADO_MODELO_UI.INACTIVO }, MODULO.SINTESIS).catch(() => {});
     notificarPopup({ type: MSG.CAPTURE_STOPPED });
     return { ok: true };
   } catch (error) {
@@ -374,8 +409,14 @@ chrome.runtime.onMessage.addListener((mensaje, _remitente, responder) => {
       return true;
 
     case MSG.GET_SETTINGS:
-      leerIdiomas()
-        .then((idiomas) => responder({ ok: true, idiomas }))
+      Promise.all([leerIdiomas(), leerDoblaje()])
+        .then(([idiomas, doblaje]) => responder({ ok: true, idiomas, doblaje }))
+        .catch((error) => responder({ ok: false, error: String(error?.message || error) }));
+      return true;
+
+    case MSG.SET_DOBLAJE:
+      guardarDoblaje(mensaje.activo)
+        .then(responder)
         .catch((error) => responder({ ok: false, error: String(error?.message || error) }));
       return true;
 

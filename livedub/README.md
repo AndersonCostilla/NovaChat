@@ -143,6 +143,25 @@ Requiere **Chrome 116 o superior** (por `chrome.runtime.getContexts`).
 3. El estado pasa a *Capturando* y la barra de nivel se mueve con el audio.
 4. Pulsa **Detener** para liberar todo.
 
+## Doblaje por voz (Fase 5)
+
+Marca **«Leer traducción en voz alta»** en el popup. LiveDub genera la voz en
+español con MMS-TTS (local, ~38 MB) y **baja el volumen del vídeo al 18 %**
+mientras habla, con rampas suaves.
+
+El modelo de voz **sólo se descarga en memoria si marcas la casilla**: si sólo
+quieres subtítulos, no gastas CPU.
+
+**El doblaje va entre 4 y 9 segundos por detrás del vídeo.** No es un fallo: es
+la suma de esperar a que acabe la frase, transcribirla, traducirla y
+sintetizarla. LiveDub sirve para entender contenido hablado, no para sincronía
+labial.
+
+| Ajuste | Dónde |
+|---|---|
+| Nivel del ducking (18 %) y rampa | `DUCKING` en `messages.js` |
+| Longitud de la cola de voz | `MAX_EN_COLA` en `sintetizador.js` |
+
 ## Términos que no se traducen
 
 OPUS-MT traduce nombres propios que no conoce (`Llama` salía como `"Joyas"`).

@@ -131,3 +131,22 @@ doble AudioContext, medidor, persistencia de estado y cortes de frase razonables
 sin regresiones. Antes de eso, lo ejecutado había sido sólo: `node --check`, validación del manifest y una simulación en Node de la máquina de
 estados del VAD con una secuencia sintética (frases de 2.048 s y 2.816 s, estado
 limpio tras cada corte). El audio real nunca se ha reproducido aquí.
+
+
+## Fase 5 — Nivel 1 (estático, en sandbox)
+
+| # | Qué se verificó | Estado | Resultado |
+|---|---|---|---|
+| 1 | `node --check` en los 15 `.js` del proyecto | EJECUTADO | sin errores |
+| 2 | `manifest.json` sigue siendo JSON válido | EJECUTADO | válido |
+| 3 | Cero URLs remotas en código propio (excluye `libs/`) | EJECUTADO | 0 coincidencias |
+| 4 | La librería vendorizada soporta `text-to-speech` y `VitsModel` | EJECUTADO (lectura del bundle) | tarea registrada, 16 referencias a `VitsModel` |
+| 5 | VITS no necesita vocoder ni *speaker embeddings* | EJECUTADO (lectura del bundle) | usa `_call_text_to_waveform` |
+| 6 | Las 3 claves de estado de módulo son distintas | EJECUTADO (`tests/test-doblaje.mjs`) | `livedub.modelo` / `.traductor` / `.sintetizador` |
+| 7 | Ducking: baja al 18 %, restaura, sin bombeo entre frases | EJECUTADO (`tests/test-doblaje.mjs`) | 29/29 |
+| 8 | Vigilante de 90 s en el sintetizador, sin promesas colgadas | EJECUTADO (`tests/test-doblaje.mjs`) | 4/4 resueltas |
+| 9 | `parar()` y `silenciar()` restauran el volumen original | EJECUTADO (`tests/test-doblaje.mjs`) | correcto |
+| 10 | Los archivos nuevos no usan APIs de `chrome` prohibidas | EJECUTADO (`tests/test-offscreen-apis.mjs`) | 11/11 |
+| 11 | Latencia real de la síntesis en Chrome | **PENDIENTE (humano)** | estimado 0,5-2 s, sin medir |
+| 12 | Que el doblaje suene y el ducking se perciba suave | **PENDIENTE (humano)** | requiere Chrome y altavoces |
+| 13 | Nombres de archivo reales del repo `Xenova/mms-tts-spa` | **NO VERIFICADO** | sin acceso a huggingface.co desde el sandbox |

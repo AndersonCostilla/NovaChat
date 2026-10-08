@@ -10,3 +10,6 @@ livedub/models/whisper-tiny/*
 livedub/models/opus-mt-en-es/*
 !livedub/models/opus-mt-en-es/.gitkeep
 !livedub/models/opus-mt-en-es/README.md
+livedub/models/mms-tts-spa/*
+!livedub/models/mms-tts-spa/.gitkeep
+!livedub/models/mms-tts-spa/README.md
