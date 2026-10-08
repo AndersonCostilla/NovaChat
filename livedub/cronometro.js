@@ -99,8 +99,27 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       motivoNoTraducir: null,
       caracteres: null,
       texto: null,
-      traduccion: null
+      traduccion: null,
+      trozosMt: null,
+      maxTokensMt: null
     });
+  }
+
+  /**
+   * Tamaño del lote que el traductor tiene dentro de generate().
+   *
+   * No lleva marca de tiempo, por eso no pasa por marcar(): es un dato de
+   * CARGA DE TRABAJO, no de instante. Se anota en cuanto el worker avisa de
+   * que empieza, para que una frase que luego agote el tiempo deje escrito
+   * cuánto trabajo había pedido. Sin esto, una traducción de 30 s es un
+   * número sin explicación.
+   */
+  function anotarLote(id, { trozos = null, maxTokens = null } = {}) {
+    const f = vivas.get(id);
+    if (!f) return false;
+    f.trozosMt = trozos;
+    f.maxTokensMt = maxTokens;
+    return true;
   }
 
   function marcar(id, etapa, extra = {}) {
@@ -142,6 +161,10 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
         'cerró por': f.motivoCierre,
         'Whisper (ms)': ms(f.tFinHabla, f.tFinAsr),
         'traducción (ms)': ms(f.tFinAsr, f.tFinMt),
+        // Cuántas oraciones iban en el mismo lote de generate(). El habla
+        // normal da 1-2; decenas delatan una alucinación repetitiva y
+        // explican una traducción desbocada.
+        'trozos MT': f.trozosMt,
         'espera hasta hablar (ms)': ms(f.tFinMt, f.tInicioVoz),
         'DESFASE desde FIN (s)': segundos(ms(f.tFinHabla, f.tInicioVoz)),
         'DESFASE desde INICIO (s)': segundos(ms(f.tInicioHabla, f.tInicioVoz)),
@@ -482,6 +505,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     marcar,
     cerrar,
     abandonar,
+    anotarLote,
     anotarPerdida,
     resumenPerdidas,
     verificacionCruzada,

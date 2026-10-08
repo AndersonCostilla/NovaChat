@@ -20,6 +20,7 @@ const SALIDA = {
   LISTO: 'LISTO',
   RESULTADO: 'RESULTADO',
   CANCELADO: 'CANCELADO', // acuse de una frase abandonada: libera el hueco
+  EN_CURSO: 'EN_CURSO', // aviso de cuánto trabajo lleva el lote que empieza
   ERROR: 'ERROR'
 };
 
@@ -214,6 +215,18 @@ async function traducir({ id, texto }) {
 
   // El pipeline acepta un array y lo procesa como LOTE en una sola llamada a
   // generate(), que es bastante más barato que una llamada por oración.
+  // DIAGNÓSTICO (8-oct-2026). Se avisa del tamaño del lote ANTES de empezar,
+  // porque generate() no se puede interrumpir: si esta frase se come el
+  // tiempo de espera, éste es el último dato que se tendrá de ella. Sin esto,
+  // una traducción que agota los 30 s no deja ni rastro de POR QUÉ.
+  self.postMessage({
+    type: SALIDA.EN_CURSO,
+    id,
+    trozos: trozos.length,
+    palabrasMasLargo,
+    maxTokens
+  });
+
   const salida = await modelo(entradas, {
     max_new_tokens: maxTokens,
     num_beams: NUM_BEAMS

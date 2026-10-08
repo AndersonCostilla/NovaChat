@@ -350,6 +350,10 @@ async function montarTranscriptor() {
 // Fase 4: worker de traducción, totalmente independiente del de Whisper.
 function montarTraductor() {
   traductor = crearTraductor({
+    // El worker avisa del tamaño del lote justo antes de entrar en generate().
+    // Se anota en el cronómetro para que la columna "trozos MT" explique las
+    // traducciones lentas en vez de dejarlas como un número suelto.
+    onTrabajo: ({ id, trozos, maxTokens }) => cronometro.anotarLote(id, { trozos, maxTokens }),
     onEstado: (info) => publicarEstadoModelo(info, MODULO.TRADUCCION),
     onActividad: (ocupado) =>
       publicarEstadoModelo(
@@ -545,6 +549,10 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
   let traduccion = '';
   let duracionTraduccionMs = 0;
   let aviso = decision.aviso;
+  // Motivo CRUDO del traductor ('tiempo agotado', 'descartada por cola llena',
+  // …). Se guarda aparte del aviso de UI porque es el que va al contador de
+  // pérdidas, y ahí interesa la causa exacta, no el texto bonito.
+  let motivoTraduccion = null;
 
   if (decision.traducir) {
     const estadoTraductor = traductor?.obtenerEstado();
@@ -555,6 +563,7 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
     duracionTraduccionMs = resultado.duracionMs || 0;
 
     if (!traduccion) {
+      motivoTraduccion = resultado.motivo || resultado.error || estadoTraductor || 'desconocido';
       // Degradación independiente: sin traducción, pero el subtítulo se publica.
       aviso = `Traducción no disponible (${resultado.motivo || estadoTraductor || 'desconocido'}).`;
     }
@@ -568,17 +577,32 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
   // después; es justo el desfase que documentamos.
   if (doblajeActivo && traduccion) {
     doblar(traduccion, duracionesOrigen.shift() ?? null, id);
+  } else if (!doblajeActivo) {
+    // El usuario apagó el doblaje. NO es pérdida: es una decisión suya, y
+    // meterla en el contador inflaría el porcentaje con algo que no es un fallo.
+    cronometro.abandonar(id, 'doblaje apagado');
   } else {
-    // No va a sonar: se cierra la medición diciendo por qué, en vez de
-    // dejar la frase abierta y falsear el recuento.
-    cronometro.abandonar(
+    // PÉRDIDA REAL (corregido el 8-oct-2026).
+    //
+    // Hasta ahora esto era un abandonar(): la frase salía en la tabla con su
+    // motivo, pero NO entraba en perdidas(), que sólo contaba los descartes de
+    // la cola de voz. El recuento daba 4 cuando en realidad eran 6, y el
+    // porcentaje salía bajo por omisión.
+    //
+    // Para el espectador no hay ninguna diferencia entre "la cola de voz la
+    // tiró" y "el traductor agotó los 30 s": en los dos casos ese tramo del
+    // vídeo pasa sin doblar. Si cuenta como pérdida una, cuentan las dos.
+    //
+    // Se separan por etapa para poder atacarlas por separado, no para
+    // disimular ninguna.
+    registrarPerdida({
       id,
-      !doblajeActivo
-        ? 'doblaje apagado'
-        : !decision.traducir
-          ? `NO se intentó traducir: ${decision.aviso}`
-          : `la traducción falló: ${aviso || 'motivo desconocido'}`
-    );
+      segundos: typeof duracionMs === 'number' ? Number((duracionMs / 1000).toFixed(2)) : null,
+      etapa: decision.traducir ? 'traducción' : 'detector de idioma',
+      detalle: decision.traducir
+        ? motivoTraduccion || 'motivo desconocido'
+        : decision.aviso || 'no se intentó traducir'
+    });
   }
 
   return publicarSubtitulo({

@@ -26,9 +26,14 @@ const TIMEOUT_CARGA_MS = 90000;
 // Margen para que el worker acuse una cancelación antes de darlo por colgado.
 const TIMEOUT_RESCATE_MS = 20000;
 
+// A partir de cuántos trozos en un mismo lote se considera anómalo. El habla
+// normal da 1-2 trozos por frase (medido con segmentador.js); una alucinación
+// repetitiva de Whisper da decenas, y el coste de generate() va con ese número.
+const TROZOS_SOSPECHOSOS = 8;
+
 const LOG = '[LiveDub][traductor]';
 
-export function crearTraductor({ onEstado, onActividad, onError } = {}) {
+export function crearTraductor({ onEstado, onActividad, onError, onTrabajo } = {}) {
   let worker = null;
   let estado = ESTADO_TRADUCTOR.INACTIVO;
   let siguienteId = 1;
@@ -44,6 +49,11 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
   let idEnVuelo = null;
   let ultimasOpciones = null;
   let vigilanteCarga = null;
+
+  // Qué lote está dentro de generate() ahora mismo: { id, trozos, maxTokens }.
+  // Sirve para que, si se agota el tiempo, el aviso diga CUÁNTO trabajo había
+  // en vuelo en vez de limitarse a "tardó demasiado".
+  let trabajoEnVuelo = null;
 
   function fijarEstado(nuevo, detalle = {}) {
     const anterior = estado;
@@ -154,6 +164,25 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
         procesarCola();
         break;
 
+      case 'EN_CURSO':
+        // El worker ya está dentro de generate() y no se le puede interrumpir.
+        trabajoEnVuelo = {
+          id: mensaje.id,
+          trozos: mensaje.trozos,
+          palabrasMasLargo: mensaje.palabrasMasLargo,
+          maxTokens: mensaje.maxTokens
+        };
+        if (mensaje.trozos >= TROZOS_SOSPECHOSOS) {
+          console.warn(
+            `${LOG} frase #${mensaje.id}: lote de ${mensaje.trozos} trozos. ` +
+              'El coste de generate() crece con el número de trozos y NO se puede ' +
+              'interrumpir a mitad: es el perfil de las traducciones que agotan el tiempo. ' +
+              'Suele venir de una alucinación repetitiva de Whisper sobre música o silencio.'
+          );
+        }
+        onTrabajo?.(trabajoEnVuelo);
+        break;
+
       case 'CANCELADO':
         console.warn(`${LOG} el worker confirmó el abandono de la frase #${mensaje.id}.`);
         if (liberarSi(mensaje.id)) procesarCola();
@@ -238,7 +267,20 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
     onActividad?.(true);
 
     const temporizador = setTimeout(() => {
-      onError?.(`La traducción ${tarea.id} superó ${TIMEOUT_MS / 1000} s y se descartó.`);
+      // Diagnóstico: distinguir "nunca empezó" de "empezó y se atascó".
+      const enVueloAhora = trabajoEnVuelo && trabajoEnVuelo.id === tarea.id ? trabajoEnVuelo : null;
+      const perfil = enVueloAhora
+        ? `lote de ${enVueloAhora.trozos} trozo(s), hasta ${enVueloAhora.maxTokens} tokens por trozo`
+        : 'el worker NUNCA llegó a empezarla (sigue ocupado con la anterior o cargando)';
+      console.error(
+        `${LOG} frase #${tarea.id}: ${TIMEOUT_MS / 1000} s agotados — ${perfil}. ` +
+          'generate() no se puede interrumpir, así que la cancelación sólo surtirá efecto ' +
+          `cuando el lote termine por su cuenta; si no lo hace en ${TIMEOUT_RESCATE_MS / 1000} s ` +
+          'se reinicia el worker y TODO lo encolado se pierde de golpe.'
+      );
+      onError?.(
+        `La traducción ${tarea.id} superó ${TIMEOUT_MS / 1000} s y se descartó (${perfil}).`
+      );
       // Se deja de esperar, pero no se finge que el worker está libre.
       resolverPendiente(tarea.id, { traduccion: '', motivo: 'tiempo agotado' });
       worker?.postMessage({ type: 'CANCELAR', id: tarea.id });
@@ -258,6 +300,7 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
     }
     pararRescate();
     idEnVuelo = null;
+    trabajoEnVuelo = null;
     enVuelo = false;
     return true;
   }
@@ -300,6 +343,7 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
     }
     pararRescate();
     idEnVuelo = null;
+    trabajoEnVuelo = null;
     enVuelo = false;
   }
 
