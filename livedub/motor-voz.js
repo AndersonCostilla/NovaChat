@@ -143,17 +143,17 @@ export function crearMotorVoz({
    * Nunca lanza: si no se puede doblar, devuelve el motivo para que quede
    * dicho por consola en vez de desaparecer en silencio.
    */
-  async function doblar(texto, { segundosOrigen = null } = {}) {
+  async function doblar(texto, { segundosOrigen = null, onEmpiezaAHablar = null } = {}) {
     if (silenciado) return { hablado: false, motivo: 'doblaje desactivado' };
 
     if (motorActivo === MOTOR_VOZ.SISTEMA && vozSistema) {
-      return vozSistema.hablar(texto, { segundosOrigen });
+      return vozSistema.hablar(texto, { segundosOrigen, onEmpiezaAHablar });
     }
 
     if (motorActivo === MOTOR_VOZ.MMS && sintetizador) {
       const resultado = await sintetizador.sintetizar(texto, { segundosOrigen });
       if (!resultado.audio) return { hablado: false, motivo: resultado.motivo || 'sin audio' };
-      const sonando = reproductor?.reproducir(resultado.audio, resultado.hz);
+      const sonando = reproductor?.reproducir(resultado.audio, resultado.hz, { onEmpiezaAHablar });
       return { hablado: Boolean(sonando), motivo: sonando ? null : 'el reproductor lo rechazó' };
     }
 

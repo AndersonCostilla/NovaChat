@@ -222,7 +222,7 @@ export function crearVozSistema({
    * cuando se da por perdida), nunca antes: quien llama necesita saber que el
    * hueco está libre.
    */
-  function hablar(texto, { segundosOrigen = null } = {}) {
+  function hablar(texto, { segundosOrigen = null, onEmpiezaAHablar = null } = {}) {
     const limpio = String(texto || '').trim();
     if (!limpio) return Promise.resolve({ hablado: false, motivo: 'texto vacío' });
     if (silenciado) return Promise.resolve({ hablado: false, motivo: 'doblaje desactivado' });
@@ -236,7 +236,7 @@ export function crearVozSistema({
     const id = siguienteId++;
 
     return new Promise((resolver) => {
-      cola.push({ id, texto: limpio, segundosOrigen, resolver });
+      cola.push({ id, texto: limpio, segundosOrigen, onEmpiezaAHablar, resolver });
 
       // Si el doblaje se acumula nos quedamos con lo más reciente: una voz
       // diez frases por detrás del vídeo no sirve de nada. Se avisa SIEMPRE,
@@ -275,6 +275,7 @@ export function crearVozSistema({
       resolver: tarea.resolver,
       texto: tarea.texto,
       segundosOrigen: tarea.segundosOrigen,
+      onEmpiezaAHablar: tarea.onEmpiezaAHablar,
       trozos,
       indice: 0,
       t0: Date.now(),
@@ -307,6 +308,14 @@ export function crearVozSistema({
       if (!p.hablo) {
         p.hablo = true;
         p.tHabla = Date.now();
+        // Momento exacto en que el usuario EMPIEZA a oír el doblaje. Es la
+        // marca que cierra la medición del desfase: lo que se percibe es
+        // cuándo suena, no cuándo acaba de sonar.
+        try {
+          p.onEmpiezaAHablar?.();
+        } catch (error) {
+          console.warn(`${LOG} el aviso de inicio de voz falló:`, error);
+        }
       }
     };
 

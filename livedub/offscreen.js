@@ -27,6 +27,7 @@ import { crearTraductor } from './traductor.js';
 import { crearMotorVoz } from './motor-voz.js';
 import { fijarVelocidadDoblaje, obtenerVelocidadDoblaje } from './reproductor-doblaje.js';
 import { detectarIdioma, NOMBRE_IDIOMA } from './detector-idioma.js';
+import { crearCronometro, MOTIVO_CIERRE } from './cronometro.js';
 
 const INTERVALO_NIVEL_MS = 100; // cada cuánto enviamos el nivel al popup
 
@@ -72,6 +73,15 @@ let motorVoz = null;
 // null = elección automática (voz del sistema, y reserva si no hay ninguna
 // instalada). Se puede forzar desde la consola con livedub.setMotorVoz().
 let motorVozPedido = null;
+
+// Mide dónde se va el tiempo de cada frase. No altera nada: sólo anota.
+// Se consulta con livedub.latencia().
+const cronometro = crearCronometro();
+
+// Cuándo llegó el primer bloque CON VOZ de la frase que se está formando.
+// Es el origen del reloj: sin esto no se puede distinguir el desfase medido
+// desde el inicio de la frase del medido desde su final.
+let tInicioHabla = null;
 // Fase 5: el doblaje por voz se activa desde el popup. Por defecto apagado:
 // añade latencia y carga de CPU, y el usuario debe poder usar sólo subtítulos.
 let doblajeActivo = false;
@@ -212,6 +222,8 @@ function procesarChunkVad(buffer, rms) {
 
   if (rms > VAD_THRESHOLD) {
     // Hay voz: acumulamos y reiniciamos la cuenta de silencio.
+    // El primer bloque con voz marca el arranque del reloj de esta frase.
+    if (!speechChunks.length) tInicioHabla = Date.now();
     isSpeaking = true;
     silenceCounter = 0;
     speechChunks.push(buffer);
@@ -226,7 +238,7 @@ function procesarChunkVad(buffer, rms) {
         `✂️ Corte forzado a los ${(frase.length / FRECUENCIA_PROCESO).toFixed(1)} s ` +
           '(habla continua sin pausas).'
       );
-      onFraseDetectada(frase);
+      onFraseDetectada(frase, MOTIVO_CIERRE.TOPE);
     }
     return;
   }
@@ -243,7 +255,7 @@ function procesarChunkVad(buffer, rms) {
     const frase = ensamblarChunks(speechChunks);
     speechChunks = [];
     silenceCounter = 0;
-    onFraseDetectada(frase);
+    onFraseDetectada(frase, MOTIVO_CIERRE.SILENCIO);
   }
 }
 
@@ -262,8 +274,12 @@ function ensamblarChunks(chunks) {
 }
 
 // Fase 2 + 3: registramos la frase y la mandamos a transcribir.
-function onFraseDetectada(float32Array) {
+function onFraseDetectada(float32Array, motivoCierre = MOTIVO_CIERRE.SILENCIO) {
   const segundos = (float32Array.length / FRECUENCIA_PROCESO).toFixed(2);
+  // Se congela el arranque de ESTA frase antes de reiniciarlo para la
+  // siguiente: con el corte por tope, la frase siguiente empieza de inmediato.
+  const arranque = tInicioHabla ?? Date.now();
+  tInicioHabla = null;
 
   duracionesOrigen.push(Number(segundos));
   while (duracionesOrigen.length > MAX_DURACIONES_ORIGEN) duracionesOrigen.shift();
@@ -273,6 +289,11 @@ function onFraseDetectada(float32Array) {
   const aceptada = transcriptor?.transcribir(float32Array, idiomaOrigen);
 
   if (aceptada) {
+    cronometro.abrir(aceptada, {
+      tInicioHabla: arranque,
+      segundosAudio: Number(segundos),
+      motivoCierre
+    });
     console.log(`🗣️ Frase detectada: ${segundos} s → enviada a transcribir (#${aceptada})`);
     return;
   }
@@ -501,7 +522,10 @@ function publicarEstadoModelo(info, modulo = MODULO.TRANSCRIPCION) {
 // Transcripción lista -> (si procede) traducción -> publicación única.
 // Se publica una sola vez, con original y traducción juntos, para no tener que
 // reinventar el canal de persistencia con actualizaciones parciales.
-async function traducirYPublicar({ texto, idiomaDetectado, duracionMs }) {
+async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
+  // Whisper ha terminado con esta frase.
+  cronometro.marcar(id, 'tFinAsr', { texto, caracteres: texto?.length ?? 0 });
+
   const decision = decidirTraduccion(texto);
 
   let traduccion = '';
@@ -522,10 +546,19 @@ async function traducirYPublicar({ texto, idiomaDetectado, duracionMs }) {
     }
   }
 
+  // La traducción ha terminado (o no hacía falta).
+  cronometro.marcar(id, 'tFinMt', { traduccion });
+
   // Fase 5: el doblaje se lanza SIN esperar (no bloquea la publicación del
   // subtítulo). El texto aparece en pantalla cuanto antes y la voz llega
   // después; es justo el desfase que documentamos.
-  if (doblajeActivo && traduccion) doblar(traduccion, duracionesOrigen.shift() ?? null);
+  if (doblajeActivo && traduccion) {
+    doblar(traduccion, duracionesOrigen.shift() ?? null, id);
+  } else {
+    // No va a sonar: se cierra la medición diciendo por qué, en vez de
+    // dejar la frase abierta y falsear el recuento.
+    cronometro.abandonar(id, doblajeActivo ? 'sin traducción' : 'doblaje apagado');
+  }
 
   return publicarSubtitulo({
     texto,
@@ -538,14 +571,23 @@ async function traducirYPublicar({ texto, idiomaDetectado, duracionMs }) {
 }
 
 // Pide la voz al motor activo. El ducking lo hace el propio motor.
-async function doblar(textoEspanol, segundosOrigen = null) {
-  const resultado = await (motorVoz?.doblar(textoEspanol, { segundosOrigen }) ??
-    Promise.resolve({ hablado: false, motivo: 'voz no iniciada' }));
+async function doblar(textoEspanol, segundosOrigen = null, idFrase = null) {
+  const resultado = await (motorVoz?.doblar(textoEspanol, {
+    segundosOrigen,
+    // Se avisa en cuanto EMPIEZA a sonar, no cuando termina: el desfase que
+    // percibe el usuario es cuándo oye la voz, no cuándo deja de oírla.
+    onEmpiezaAHablar: () => cronometro.marcar(idFrase, 'tInicioVoz')
+  }) ?? Promise.resolve({ hablado: false, motivo: 'voz no iniciada' }));
 
   // Nunca en silencio: si no hay voz, se dice por qué.
   if (!resultado.hablado) {
     console.warn(`[LiveDub] Sin doblaje para esta frase (${resultado.motivo || 'motivo desconocido'}).`);
+    cronometro.abandonar(idFrase, resultado.motivo || 'no sonó');
+    return;
   }
+
+  cronometro.marcar(idFrase, 'tFinVoz');
+  cronometro.cerrar(idFrase);
 }
 
 // Subtítulo -> service worker -> historial en storage.session + popup.
@@ -862,6 +904,43 @@ globalThis.livedub = {
 
   // Borra las mediciones y reactiva el doblaje si se había apagado solo.
   reintentarVoz: () => motorVoz?.sintetizador()?.reintentar() ?? null,
+
+  // ─── PASO 0: ¿de dónde salen los segundos de desfase? ───────────────
+  // Tabla frase a frase con las marcas de tiempo reales. Uso:
+  //   livedub.latencia()
+  latencia: () => {
+    const filas = cronometro.filas();
+    if (!filas.length) {
+      console.log(
+        '[LiveDub] Todavía no hay frases medidas. Deja correr el vídeo un par ' +
+          'de minutos con el doblaje ACTIVADO y vuelve a ejecutarlo.'
+      );
+      return null;
+    }
+    console.table(filas);
+    console.log('\n── RESUMEN ──');
+    console.table(cronometro.resumen());
+    console.log('\n' + cronometro.explicacion());
+    return { filas, resumen: cronometro.resumen() };
+  },
+
+  // Texto plano para pegar en el chat sin perder el formato de la tabla.
+  latenciaTexto: () => {
+    const filas = cronometro.filas();
+    if (!filas.length) return 'Sin datos todavía.';
+    const cols = Object.keys(filas[0]);
+    const lineas = [cols.join(' | '), cols.map(() => '---').join(' | ')];
+    for (const f of filas) lineas.push(cols.map((c) => String(f[c] ?? '')).join(' | '));
+    const texto = lineas.join('\n') + '\n\n' + cronometro.explicacion();
+    console.log(texto);
+    return texto;
+  },
+
+  // Borra las mediciones para empezar una tanda limpia.
+  latenciaReiniciar: () => {
+    cronometro.reiniciar();
+    return 'Mediciones borradas. Deja correr el vídeo otra vez.';
+  },
 
   // Permite afinar el VAD en caliente, sin recargar la extensión.
   vadInfo: () => ({ VAD_THRESHOLD, MAX_SILENCE_CHUNKS, MAX_FRASE_CHUNKS }),

@@ -81,6 +81,9 @@ export function crearTranscriptor({ onEstado, onActividad, onResultado, onError 
         cancelarEnVuelo();
         if (mensaje.texto) {
           onResultado?.({
+            // El id viaja con el resultado para poder correlacionar las
+            // etapas de la frase en el cronómetro. No se usa para nada más.
+            id: mensaje.id,
             texto: mensaje.texto,
             idiomaDetectado: mensaje.idiomaDetectado,
             duracionMs: mensaje.duracionMs

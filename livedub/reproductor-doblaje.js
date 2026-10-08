@@ -63,11 +63,11 @@ export function crearReproductorDoblaje({ ducking, obtenerCadena, onHablando } =
    * @param {Float32Array} audio
    * @param {number} hz frecuencia de muestreo con la que se generó
    */
-  function reproducir(audio, hz) {
+  function reproducir(audio, hz, { onEmpiezaAHablar = null } = {}) {
     if (silenciado) return false;
     if (!audio || !audio.length) return false;
 
-    cola.push({ audio, hz: hz || 16000 });
+    cola.push({ audio, hz: hz || 16000, onEmpiezaAHablar });
 
     // Si el doblaje se acumula, nos quedamos con lo más reciente: una voz que
     // va diez frases por detrás del vídeo no sirve de nada.
@@ -120,6 +120,12 @@ export function crearReproductorDoblaje({ ducking, obtenerCadena, onHablando } =
     reproduciendo = true;
     fuenteActual = fuente;
     onHablando?.(true);
+    // Momento exacto en que empieza a oírse, igual que en voz-sistema.js.
+    try {
+      tarea.onEmpiezaAHablar?.();
+    } catch (error) {
+      console.warn(`${LOG} el aviso de inicio de voz falló:`, error);
+    }
 
     const segundos = tarea.audio.length / tarea.hz;
     const oidos = (segundos / velocidad).toFixed(2);
