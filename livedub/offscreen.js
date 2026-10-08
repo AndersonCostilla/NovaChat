@@ -527,6 +527,13 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
   cronometro.marcar(id, 'tFinAsr', { texto, caracteres: texto?.length ?? 0 });
 
   const decision = decidirTraduccion(texto);
+  // Se anota si siquiera se INTENTÓ traducir. Sin esto, "0 ms de traducción"
+  // es ambiguo: puede significar que el traductor falló al instante o que ni
+  // se le llamó, y son dos problemas distintos.
+  cronometro.marcar(id, 'tDecision', {
+    seIntentoTraducir: decision.traducir,
+    motivoNoTraducir: decision.traducir ? null : decision.aviso
+  });
 
   let traduccion = '';
   let duracionTraduccionMs = 0;
@@ -557,7 +564,14 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
   } else {
     // No va a sonar: se cierra la medición diciendo por qué, en vez de
     // dejar la frase abierta y falsear el recuento.
-    cronometro.abandonar(id, doblajeActivo ? 'sin traducción' : 'doblaje apagado');
+    cronometro.abandonar(
+      id,
+      !doblajeActivo
+        ? 'doblaje apagado'
+        : !decision.traducir
+          ? `NO se intentó traducir: ${decision.aviso}`
+          : `la traducción falló: ${aviso || 'motivo desconocido'}`
+    );
   }
 
   return publicarSubtitulo({

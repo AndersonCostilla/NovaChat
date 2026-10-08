@@ -64,6 +64,9 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       tFinMt: null,
       tInicioVoz: null,
       tFinVoz: null,
+      tDecision: null,
+      seIntentoTraducir: null,
+      motivoNoTraducir: null,
       caracteres: null,
       texto: null,
       traduccion: null
@@ -84,6 +87,12 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     if (!f) return null;
     vivas.delete(id);
     f.motivoFinal = motivoFinal;
+
+    // Hueco entre el final de la frase ANTERIOR y el de ésta: es el tiempo
+    // real que el sistema tuvo para despachar la anterior. Se mide sobre
+    // tFinHabla porque es el instante en que empieza el trabajo de cada una.
+    const previa = historial[historial.length - 1];
+    f.intervaloMs = previa ? f.tFinHabla - previa.tFinHabla : null;
     historial.push(f);
     while (historial.length > MAX_FRASES) historial.shift();
     return f;
@@ -112,9 +121,25 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
         'espera hasta hablar (ms)': ms(f.tFinMt, f.tInicioVoz),
         'DESFASE desde FIN (s)': segundos(ms(f.tFinHabla, f.tInicioVoz)),
         'DESFASE desde INICIO (s)': segundos(ms(f.tInicioHabla, f.tInicioVoz)),
+        // Cuánto dura el doblaje hablado y cuánto se tardó en llegar a esta
+        // frase desde la anterior. El cociente de ambos es lo que decide si
+        // el sistema da abasto o no.
+        'doblaje hablado (s)': segundos(ms(f.tInicioVoz, f.tFinVoz)),
+        'hueco disponible (s)': segundos(f.intervaloMs ?? null),
+        'ocupación (%)': ocupacionDe(f),
         'resultado': f.motivoFinal || 'doblada'
       };
     });
+  }
+
+  /**
+   * Qué porcentaje del hueco entre dos frases se come el doblaje de la
+   * anterior. Por encima de 100 el sistema NO da abasto: cada frase empuja
+   * a la siguiente y el retraso crece hasta que hay que descartar.
+   */
+  function ocupacionDe(f) {
+    if (f.tInicioVoz === null || f.tFinVoz === null || !f.intervaloMs) return null;
+    return Math.round(((f.tFinVoz - f.tInicioVoz) / f.intervaloMs) * 100);
   }
 
   function segundos(milis) {
@@ -147,6 +172,30 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
 
     const porTope = historial.filter((f) => f.motivoCierre === MOTIVO_CIERRE.TOPE).length;
 
+    // ─── ¿Da abasto el canal de voz? ─────────────────────────────────
+    // La voz es un recurso de UNO EN UNO: mientras habla una frase, las
+    // demás esperan. Si el doblaje hablado dura más que el hueco entre
+    // frases, cada una empuja a la siguiente y el retraso crece sin techo.
+    const conVoz = dobladas.filter((f) => f.tFinVoz !== null && f.intervaloMs);
+    const duracionVoz = conVoz.map((f) => f.tFinVoz - f.tInicioVoz);
+    const intervalos = conVoz.map((f) => f.intervaloMs);
+    const ocupaciones = conVoz.map((f) => ((f.tFinVoz - f.tInicioVoz) / f.intervaloMs) * 100);
+    const expansiones = conVoz
+      .filter((f) => f.segundosAudio > 0)
+      .map((f) => (f.tFinVoz - f.tInicioVoz) / 1000 / f.segundosAudio);
+
+    const ocupacionMediana = mediana(ocupaciones);
+    const descartadas = historial.filter((f) => /descartada/i.test(f.motivoFinal || '')).length;
+
+    // ─── ¿Cuesta Whisper lo mismo da igual la frase? ─────────────────
+    // Si el coste es FIJO por frase (Whisper rellena a 30 s pase lo que
+    // pase), acortar las frases NO reduce el tiempo de transcripción y en
+    // cambio multiplica el número de veces que hay que pagarlo.
+    const cortas = dobladas.filter((f) => f.segundosAudio < 6 && f.tFinAsr);
+    const largas = dobladas.filter((f) => f.segundosAudio >= 11 && f.tFinAsr);
+    const asrCortas = mediana(cortas.map((f) => f.tFinAsr - f.tFinHabla));
+    const asrLargas = mediana(largas.map((f) => f.tFinAsr - f.tFinHabla));
+
     return {
       frases: historial.length,
       dobladas: dobladas.length,
@@ -161,8 +210,44 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       'duración media de la frase (s)': segundos(mediana(duracion)),
       'Whisper (mediana, s)': segundos(mediana(asr)),
       'traducción (mediana, s)': segundos(mediana(mt)),
-      'espera en cola antes de hablar (mediana, s)': segundos(mediana(espera))
+      'espera en cola antes de hablar (mediana, s)': segundos(mediana(espera)),
+
+      // ─── Capacidad ───────────────────────────────────────────────
+      'duración del doblaje hablado (mediana, s)': segundos(mediana(duracionVoz)),
+      'hueco entre frases (mediana, s)': segundos(mediana(intervalos)),
+      'OCUPACIÓN del canal de voz (%)': ocupacionMediana === null ? null : Math.round(ocupacionMediana),
+      'el español dura x veces el original':
+        mediana(expansiones) === null ? null : Number(mediana(expansiones).toFixed(2)),
+      'frases descartadas por retraso': descartadas,
+      VEREDICTO: veredictoCapacidad(ocupacionMediana, descartadas),
+
+      // ─── ¿Es el coste de Whisper fijo o proporcional? ────────────
+      'Whisper en frases cortas (<6 s)': asrCortas === null ? 'sin muestras' : `${segundos(asrCortas)} s (${cortas.length})`,
+      'Whisper en frases largas (≥11 s)': asrLargas === null ? 'sin muestras' : `${segundos(asrLargas)} s (${largas.length})`
     };
+  }
+
+  /**
+   * Traduce la ocupación a un veredicto. Por encima del 100 % el sistema no
+   * da abasto de forma ESTRUCTURAL: no es que vaya lento, es que no cabe.
+   */
+  function veredictoCapacidad(ocupacion, descartadas) {
+    if (ocupacion === null) return 'sin datos suficientes';
+    if (ocupacion >= 100) {
+      return (
+        'NO DA ABASTO: el doblaje hablado dura MÁS que el hueco entre frases. ' +
+        'El retraso crece sin techo y sólo se frena descartando frases' +
+        (descartadas ? ` (ya van ${descartadas})` : '') + '.'
+      );
+    }
+    if (ocupacion >= 85) {
+      return (
+        'AL LÍMITE: el canal de voz va al ' + Math.round(ocupacion) + ' %. Cabe de media, ' +
+        'pero cualquier frase un poco más larga crea un atasco que tarda en deshacerse. ' +
+        'Es lo que produce los picos de espera.'
+      );
+    }
+    return 'HAY MARGEN: el canal de voz va al ' + Math.round(ocupacion) + ' %.';
   }
 
   /**
@@ -193,6 +278,23 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       `  · ${espera} s esperando turno para hablar.`,
       ''
     ];
+
+    // El canal de voz manda sobre todo lo demás: si no da abasto, da igual
+    // lo rápido que vaya Whisper.
+    const ocup = r['OCUPACIÓN del canal de voz (%)'];
+    if (ocup !== null && ocup >= 85) {
+      lineas.push(
+        `CAPACIDAD: ${r.VEREDICTO}`,
+        `El doblaje hablado dura ${r['duración del doblaje hablado (mediana, s)']} s y el hueco ` +
+          `entre frases es de ${r['hueco entre frases (mediana, s)']} s ` +
+          `(el español dura ${r['el español dura x veces el original']} veces el original).`,
+        '',
+        'OJO: esto NO se arregla acortando las frases. Lo que importa es la ' +
+          'PROPORCIÓN entre el doblaje y el original, y esa proporción no cambia ' +
+          'por partir las frases en trozos más pequeños.',
+        ''
+      );
+    }
 
     // El diagnóstico, dicho sin rodeos.
     if (fin !== null && fin > 6) {

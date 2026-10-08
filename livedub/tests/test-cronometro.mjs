@@ -35,6 +35,10 @@ function relojFalso(inicio = 1_000_000) {
       t += ms;
       return t;
     },
+    fijar: (v) => {
+      t = v;
+      return t;
+    },
     valor: () => t
   };
 }
@@ -205,6 +209,151 @@ bloque('Robustez');
 
   crono.reiniciar();
   comprobar('reiniciar lo deja a cero', crono.total() === 0);
+}
+
+bloque('CAPACIDAD: ¿cabe el doblaje en el hueco entre frases?');
+
+// Simula la tubería de verdad: el audio SIGUE LLEGANDO mientras la voz
+// habla. Es la diferencia clave — si las frases esperasen a que terminara
+// el doblaje, nunca habría atasco y la medida no serviría de nada.
+function simularTuberia({ duracionFrase, duracionVoz, computo, frases }) {
+  const reloj = relojFalso(0);
+  const crono = crearCronometro({ ahora: reloj.ahora });
+  let vozLibreEn = 0;
+
+  for (let i = 1; i <= frases; i++) {
+    const tFinHabla = i * duracionFrase;
+
+    reloj.fijar(tFinHabla);
+    crono.abrir(i, {
+      tInicioHabla: tFinHabla - duracionFrase,
+      segundosAudio: duracionFrase / 1000,
+      motivoCierre: MOTIVO_CIERRE.TOPE
+    });
+
+    reloj.fijar(tFinHabla + computo);
+    crono.marcar(i, 'tFinAsr');
+    crono.marcar(i, 'tFinMt');
+
+    const inicioVoz = Math.max(tFinHabla + computo, vozLibreEn);
+    reloj.fijar(inicioVoz);
+    crono.marcar(i, 'tInicioVoz');
+
+    vozLibreEn = inicioVoz + duracionVoz;
+    reloj.fijar(vozLibreEn);
+    crono.marcar(i, 'tFinVoz');
+    crono.cerrar(i);
+  }
+  return crono;
+}
+
+{
+  // El doblaje dura 1,11 veces el original: el caso que la simulación
+  // señala como responsable del pico de la frase #14.
+  const crono = simularTuberia({
+    duracionFrase: 12030,
+    duracionVoz: 13350,
+    computo: 6230,
+    frases: 10
+  });
+
+  const r = crono.resumen();
+  comprobar(
+    'mide el hueco real entre frases (12,03 s)',
+    r['hueco entre frases (mediana, s)'] === 12.03,
+    String(r['hueco entre frases (mediana, s)'])
+  );
+  comprobar(
+    'detecta que el doblaje NO cabe en ese hueco',
+    r['OCUPACIÓN del canal de voz (%)'] >= 100,
+    `${r['OCUPACIÓN del canal de voz (%)']} %`
+  );
+  comprobar('y lo dice sin rodeos', /NO DA ABASTO/.test(r.VEREDICTO), r.VEREDICTO);
+  comprobar(
+    'calcula la expansión español/original',
+    r['el español dura x veces el original'] === 1.11,
+    String(r['el español dura x veces el original'])
+  );
+  comprobar(
+    'avisa de que acortar las frases NO lo arregla',
+    /PROPORCIÓN/.test(crono.explicacion())
+  );
+
+  // LA COMPROBACIÓN QUE IMPORTA: la espera crece frase a frase.
+  const esperas = crono.filas().map((f) => f['espera hasta hablar (ms)']);
+  comprobar(
+    'la espera CRECE con cada frase (atasco acumulativo)',
+    esperas.at(-1) > esperas[0] + 5000,
+    `primera ${esperas[0]} ms, última ${esperas.at(-1)} ms`
+  );
+}
+
+{
+  // Mismo montaje pero con el doblaje más corto que el original: cabe.
+  const crono = simularTuberia({
+    duracionFrase: 12030,
+    duracionVoz: 9000,
+    computo: 6230,
+    frases: 10
+  });
+  const r = crono.resumen();
+  comprobar('con holgura, la ocupación baja del 85 %', r['OCUPACIÓN del canal de voz (%)'] < 85,
+    `${r['OCUPACIÓN del canal de voz (%)']} %`);
+  comprobar('y el veredicto lo refleja', /HAY MARGEN/.test(r.VEREDICTO), r.VEREDICTO);
+
+  const esperas = crono.filas().map((f) => f['espera hasta hablar (ms)']);
+  comprobar('y la espera NO crece', esperas.at(-1) <= esperas[0] + 100,
+    `primera ${esperas[0]} ms, última ${esperas.at(-1)} ms`);
+}
+
+{
+  // Justo en el límite: cabe de media, pero sin margen.
+  const crono = simularTuberia({
+    duracionFrase: 12030,
+    duracionVoz: 11000,
+    computo: 6230,
+    frases: 8
+  });
+  const r = crono.resumen();
+  comprobar('el caso límite se marca como AL LÍMITE', /AL LÍMITE/.test(r.VEREDICTO), r.VEREDICTO);
+}
+
+bloque('Whisper: ¿coste fijo por frase o proporcional a la duración?');
+{
+  const reloj = relojFalso();
+  const crono = crearCronometro({ ahora: reloj.ahora });
+  let t = reloj.valor();
+
+  // Frases cortas y largas con el MISMO coste de Whisper: eso delataría un
+  // coste fijo por frase (la ventana de 30 s se rellena igual).
+  const casos = [3, 3, 3, 12, 12, 12];
+  casos.forEach((dur, i) => {
+    const t0 = t;
+    reloj.avanzar(dur * 1000);
+    crono.abrir(i + 1, { tInicioHabla: t0, segundosAudio: dur, motivoCierre: MOTIVO_CIERRE.SILENCIO });
+    reloj.avanzar(4200); // mismo coste para todas
+    crono.marcar(i + 1, 'tFinAsr');
+    crono.marcar(i + 1, 'tFinMt');
+    crono.marcar(i + 1, 'tInicioVoz');
+    reloj.avanzar(1000);
+    crono.marcar(i + 1, 'tFinVoz');
+    crono.cerrar(i + 1);
+    t = reloj.valor();
+  });
+
+  const r = crono.resumen();
+  comprobar(
+    'separa el coste de Whisper en frases cortas',
+    /4\.2 s \(3\)/.test(r['Whisper en frases cortas (<6 s)']),
+    r['Whisper en frases cortas (<6 s)']
+  );
+  comprobar(
+    'y en frases largas',
+    /4\.2 s \(3\)/.test(r['Whisper en frases largas (≥11 s)']),
+    r['Whisper en frases largas (≥11 s)']
+  );
+  comprobar('sin muestras, lo dice en vez de inventar',
+    crearCronometro().resumen().frases === 0);
 }
 
 console.log(`\n==========================================================`);
