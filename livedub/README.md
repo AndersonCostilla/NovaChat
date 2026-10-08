@@ -3,6 +3,22 @@
 Extensión de Chrome (Manifest V3) en JavaScript vanilla con módulos ES.
 **Sin frameworks, sin paso de build, sin CDN, sin servicios de pago.**
 
+> ## Alcance: doblaje continuo, NO sincronizado
+>
+> La voz española va **permanentemente 15-18 segundos por detrás de la
+> imagen**, y así va a quedarse. **No hay sincronía labial y no la habrá.**
+>
+> El retraso no es lentitud del equipo: no se puede traducir una frase antes
+> de haberla oído entera (hasta 12 s de espera del VAD + transcripción +
+> traducción). Y LiveDub **oye el audio a la vez que tú**, porque la captura
+> de pestaña entrega el sonido según se reproduce: no existe adelanto posible
+> sin retrasar también el vídeo, cosa que se descartó.
+>
+> El objetivo es **entender contenido hablado en otro idioma sin leer
+> subtítulos**, no doblar como un estudio. Limitación aceptada
+> explícitamente por el propietario del proyecto.
+> Detalle completo en [`docs/ALCANCE-DOBLAJE.md`](docs/ALCANCE-DOBLAJE.md).
+
 Hasta ahora LiveDub **sólo** hace esto:
 
 1. Captura el audio de la pestaña activa (`chrome.tabCapture.getMediaStreamId`).

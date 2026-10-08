@@ -1,4 +1,9 @@
-# TODO y hallazgos
+# TODO de LiveDub
+
+> **Decisión de alcance cerrada (8 oct 2026):** doblaje **continuo** con
+> desfase fijo de **15-18 s**. Sin sincronía labial. Sin tocar el vídeo.
+> Aceptada por el propietario. Ver [`ALCANCE-DOBLAJE.md`](ALCANCE-DOBLAJE.md).
+> **No reabrir salvo petición expresa suya.**
 
 ## Fase 5 — voz en español + ducking (ENTREGADA, Nivel 2 pendiente)
 
