@@ -23,6 +23,9 @@ const TIMEOUT_MS = 30000; // 30 s por frase: si no, se da por perdida
 // siempre y la cola descartando frases en silencio.
 const TIMEOUT_CARGA_MS = 90000;
 
+// Margen para que el worker acuse una cancelación antes de darlo por colgado.
+const TIMEOUT_RESCATE_MS = 20000;
+
 const LOG = '[LiveDub][traductor]';
 
 export function crearTraductor({ onEstado, onActividad, onError } = {}) {
@@ -33,6 +36,13 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
   const cola = []; // { id, texto, resolver }
   const pendientes = new Map(); // id -> { resolver, temporizador }
   let enVuelo = false;
+
+  // Id de la frase que está AHORA MISMO dentro del worker. Mismo arreglo que
+  // en sintetizador.js: antes `enVuelo` era un booleano suelto y el resultado
+  // tardío de una frase ya dada por perdida liberaba un hueco que no estaba
+  // libre, metiendo dos traducciones en paralelo en el mismo núcleo.
+  let idEnVuelo = null;
+  let ultimasOpciones = null;
   let vigilanteCarga = null;
 
   function fijarEstado(nuevo, detalle = {}) {
@@ -75,6 +85,7 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
 
   function iniciar({ rutaModelos, rutaWasm, modelo }) {
     if (worker) return;
+    ultimasOpciones = { rutaModelos, rutaWasm, modelo };
 
     console.log(`${LOG} iniciando worker`, { modelo, rutaModelos });
     fijarEstado(ESTADO_TRADUCTOR.CARGANDO, { detalle: 'Cargando traductor local…' });
@@ -132,13 +143,20 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
         break;
 
       case 'RESULTADO':
+        // Si no es el que esperábamos, es el de una frase ya dada por perdida:
+        // no libera el hueco y no se procesa como actual.
+        if (!liberarSi(mensaje.id)) break;
         resolverPendiente(mensaje.id, {
           traduccion: mensaje.traduccion,
           duracionMs: mensaje.duracionMs,
           trozos: mensaje.trozos // nº de oraciones en que se partió la frase
         });
-        enVuelo = false;
         procesarCola();
+        break;
+
+      case 'CANCELADO':
+        console.warn(`${LOG} el worker confirmó el abandono de la frase #${mensaje.id}.`);
+        if (liberarSi(mensaje.id)) procesarCola();
         break;
 
       case 'ERROR':
@@ -149,8 +167,7 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
         } else {
           onError?.(mensaje.error);
           resolverPendiente(mensaje.id, { traduccion: '', error: mensaje.error });
-          enVuelo = false;
-          procesarCola();
+          if (liberarSi(mensaje.id)) procesarCola();
         }
         break;
 
@@ -222,13 +239,45 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
 
     const temporizador = setTimeout(() => {
       onError?.(`La traducción ${tarea.id} superó ${TIMEOUT_MS / 1000} s y se descartó.`);
+      // Se deja de esperar, pero no se finge que el worker está libre.
       resolverPendiente(tarea.id, { traduccion: '', motivo: 'tiempo agotado' });
-      enVuelo = false;
-      procesarCola();
+      worker?.postMessage({ type: 'CANCELAR', id: tarea.id });
+      armarRescate(tarea.id);
     }, TIMEOUT_MS);
 
     pendientes.set(tarea.id, { resolver: tarea.resolver, temporizador });
+    idEnVuelo = tarea.id;
     worker.postMessage({ type: 'TRADUCIR', id: tarea.id, texto: tarea.texto });
+  }
+
+  // ÚNICO punto donde se declara libre el worker, y sólo para el id correcto.
+  function liberarSi(id) {
+    if (id !== idEnVuelo) {
+      console.warn(`${LOG} mensaje CADUCADO de la frase #${id} (en vuelo: #${idEnVuelo}). Se ignora.`);
+      return false;
+    }
+    pararRescate();
+    idEnVuelo = null;
+    enVuelo = false;
+    return true;
+  }
+
+  let rescate = null;
+  function pararRescate() {
+    if (rescate === null) return;
+    clearTimeout(rescate);
+    rescate = null;
+  }
+  function armarRescate(id) {
+    pararRescate();
+    rescate = setTimeout(() => {
+      rescate = null;
+      if (idEnVuelo !== id) return;
+      console.error(`${LOG} el worker no soltó la frase #${id} tras cancelarla. Se reinicia.`);
+      const opciones = ultimasOpciones;
+      destruir();
+      if (opciones) iniciar(opciones);
+    }, TIMEOUT_RESCATE_MS);
   }
 
   function resolverPendiente(id, resultado) {
@@ -249,6 +298,8 @@ export function crearTraductor({ onEstado, onActividad, onError } = {}) {
     while (cola.length) {
       cola.shift().resolver({ traduccion: '', motivo });
     }
+    pararRescate();
+    idEnVuelo = null;
     enVuelo = false;
   }
 

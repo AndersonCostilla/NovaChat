@@ -29,6 +29,11 @@ const MAX_EN_COLA = 2;
 const TIMEOUT_MS = 30000; // por frase
 const TIMEOUT_CARGA_MS = 90000; // vigilante de carga, igual que en el traductor
 
+// Margen que se le da al worker para acusar una cancelación antes de darlo
+// por colgado y reciclarlo. Una llamada a ONNX ya en marcha no se puede
+// interrumpir; esto cubre el caso de que se atasque dentro de una.
+const TIMEOUT_RESCATE_MS = 20000;
+
 const LOG = '[LiveDub][sintetizador]';
 
 export function crearSintetizador({ onEstado, onActividad, onError, onRendimiento } = {}) {
@@ -53,6 +58,14 @@ export function crearSintetizador({ onEstado, onActividad, onError, onRendimient
 
   const cola = []; // { id, texto, resolver }
   const pendientes = new Map();
+
+  // Id de la frase que está AHORA MISMO dentro del worker. Es la pieza clave
+  // del arreglo de colas: antes `enVuelo` era un simple booleano y cualquier
+  // mensaje que llegase lo ponía a false, incluido el resultado tardío de una
+  // frase ya dada por perdida. Eso liberaba un hueco que no estaba libre y
+  // metía una segunda inferencia en paralelo.
+  let idEnVuelo = null;
+  let ultimasOpciones = null; // se guardan para poder reiniciar el worker
   // Cuánto duraba el fragmento ORIGINAL de cada frase. Sirve para calcular la
   // expansión (cuánto más largo es el doblaje que lo que sustituye).
   const origenPorId = new Map();
@@ -88,6 +101,7 @@ export function crearSintetizador({ onEstado, onActividad, onError, onRendimient
 
   function iniciar({ rutaModelos, rutaWasm, modelo }) {
     if (worker) return;
+    ultimasOpciones = { rutaModelos, rutaWasm, modelo }; // para poder reciclarlo
 
     console.log(`${LOG} iniciando worker`, { modelo, rutaModelos });
     fijarEstado(ESTADO_SINTETIZADOR.CARGANDO, { detalle: 'Cargando voz local…' });
@@ -144,8 +158,11 @@ export function crearSintetizador({ onEstado, onActividad, onError, onRendimient
         break;
 
       case 'RESULTADO': {
-        // Se anota ANTES de resolver: así el veredicto está al día cuando
-        // llegue la siguiente frase.
+        // Si este resultado no es el que esperábamos, es el de una frase que
+        // ya dimos por perdida. NO libera el hueco y NO entra en la medición:
+        // su duración está contaminada por haber competido con otra.
+        if (!liberarSi(mensaje.id)) break;
+
         const medida = banco.registrar({
           id: mensaje.id,
           caracteres: mensaje.caracteres,
@@ -162,10 +179,15 @@ export function crearSintetizador({ onEstado, onActividad, onError, onRendimient
           duracionMs: mensaje.duracionMs,
           medida
         });
-        enVuelo = false;
         procesarCola();
         break;
       }
+
+      case 'CANCELADO':
+        // El worker confirma que soltó la frase. AHORA sí está libre.
+        console.warn(`${LOG} el worker confirmó el abandono de la frase #${mensaje.id}.`);
+        if (liberarSi(mensaje.id)) procesarCola();
+        break;
 
       case 'ERROR':
         console.error(`${LOG} error del worker (fase ${mensaje.fase}):`, mensaje.error);
@@ -175,8 +197,7 @@ export function crearSintetizador({ onEstado, onActividad, onError, onRendimient
         } else {
           onError?.(mensaje.error);
           resolverPendiente(mensaje.id, { audio: null, motivo: mensaje.error });
-          enVuelo = false;
-          procesarCola();
+          if (liberarSi(mensaje.id)) procesarCola();
         }
         break;
 
@@ -258,13 +279,53 @@ export function crearSintetizador({ onEstado, onActividad, onError, onRendimient
 
     const temporizador = setTimeout(() => {
       onError?.(`La síntesis ${tarea.id} superó ${TIMEOUT_MS / 1000} s y se descartó.`);
+      // Se deja de ESPERAR el resultado, pero no se finge que el worker está
+      // libre: sigue calculando. Se le pide que abandone y se espera su acuse.
       resolverPendiente(tarea.id, { audio: null, motivo: 'tiempo agotado' });
-      enVuelo = false;
-      procesarCola();
+      worker?.postMessage({ type: 'CANCELAR', id: tarea.id });
+      armarRescate(tarea.id);
     }, TIMEOUT_MS);
 
     pendientes.set(tarea.id, { resolver: tarea.resolver, temporizador });
+    idEnVuelo = tarea.id;
     worker.postMessage({ type: 'SINTETIZAR', id: tarea.id, texto: tarea.texto });
+  }
+
+  // ÚNICO punto donde se declara libre el worker, y sólo para el id correcto.
+  function liberarSi(id) {
+    if (id !== idEnVuelo) {
+      console.warn(`${LOG} mensaje CADUCADO de la frase #${id} (en vuelo: #${idEnVuelo}). Se ignora.`);
+      return false;
+    }
+    pararRescate();
+    idEnVuelo = null;
+    enVuelo = false;
+    return true;
+  }
+
+  // Si el worker no acusa la cancelación, es que se quedó colgado dentro de
+  // una llamada a ONNX que no se puede interrumpir. Entonces sí se recicla
+  // entero: más vale perder el modelo cargado que quedarse mudo para siempre.
+  let rescate = null;
+  function pararRescate() {
+    if (rescate === null) return;
+    clearTimeout(rescate);
+    rescate = null;
+  }
+  function armarRescate(id) {
+    pararRescate();
+    rescate = setTimeout(() => {
+      rescate = null;
+      if (idEnVuelo !== id) return;
+      console.error(`${LOG} el worker no soltó la frase #${id} tras cancelarla. Se reinicia.`);
+      reiniciarWorker();
+    }, TIMEOUT_RESCATE_MS);
+  }
+
+  function reiniciarWorker() {
+    const opciones = ultimasOpciones;
+    destruir();
+    if (opciones) iniciar(opciones);
   }
 
   function resolverPendiente(id, resultado) {
@@ -280,6 +341,8 @@ export function crearSintetizador({ onEstado, onActividad, onError, onRendimient
     for (const [id] of pendientes) resolverPendiente(id, { audio: null, motivo });
     while (cola.length) cola.shift().resolver({ audio: null, motivo });
     origenPorId.clear();
+    pararRescate();
+    idEnVuelo = null;
     enVuelo = false;
   }
 

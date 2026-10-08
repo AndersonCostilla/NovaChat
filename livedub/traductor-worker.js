@@ -14,11 +14,12 @@ import { pipeline, env } from './libs/transformers/transformers.min.js';
 import { trocearEnOraciones, unirTraducciones } from './segmentador.js';
 import { proteger, restaurar, limpiarMarcadoresSueltos } from './terminos-protegidos.js';
 
-const ENTRADA = { INIT: 'INIT', TRADUCIR: 'TRADUCIR' };
+const ENTRADA = { INIT: 'INIT', TRADUCIR: 'TRADUCIR', CANCELAR: 'CANCELAR' };
 const SALIDA = {
   PROGRESO: 'PROGRESO',
   LISTO: 'LISTO',
   RESULTADO: 'RESULTADO',
+  CANCELADO: 'CANCELADO', // acuse de una frase abandonada: libera el hueco
   ERROR: 'ERROR'
 };
 
@@ -177,6 +178,15 @@ async function cargarModelo() {
 /* ------------------------------------------------------------------ */
 
 async function traducir({ id, texto }) {
+  // A diferencia del sintetizador, aquí la traducción es UNA sola llamada por
+  // lote: no hay puntos intermedios donde abandonar. Sólo se puede evitar
+  // empezarla.
+  if (estaCancelado(id)) {
+    cancelados.delete(id);
+    console.warn(`${LOG} frase #${id}: cancelada antes de empezar.`);
+    self.postMessage({ type: SALIDA.CANCELADO, id });
+    return;
+  }
   const inicio = performance.now();
   const modelo = await cargarModelo();
 
@@ -252,8 +262,7 @@ async function traducir({ id, texto }) {
 /* Protocolo de mensajes                                               */
 /* ------------------------------------------------------------------ */
 
-self.onmessage = async (evento) => {
-  const mensaje = evento.data || {};
+async function atender(mensaje) {
 
   try {
     switch (mensaje.type) {
@@ -281,6 +290,39 @@ self.onmessage = async (evento) => {
       error: String(error?.message || error)
     });
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Serialización y cancelación (arreglo de colas, 7-oct-2026)          */
+/* ------------------------------------------------------------------ */
+//
+// Mismo defecto que se encontró en el sintetizador: `self.onmessage = async`
+// NO espera a terminar antes de atender el mensaje siguiente, así que dos
+// traducciones podían correr a la vez repartiéndose el único núcleo. Ahora se
+// encadenan.
+let cadena = Promise.resolve();
+const cancelados = new Set();
+
+function estaCancelado(id) {
+  return id !== undefined && id !== null && cancelados.has(id);
+}
+
+self.onmessage = (evento) => {
+  const mensaje = evento.data || {};
+
+  // CANCELAR no pasa por la cadena: si esperase su turno llegaría después del
+  // trabajo que pretende cancelar.
+  if (mensaje.type === ENTRADA.CANCELAR) {
+    if (mensaje.id !== undefined && mensaje.id !== null) {
+      cancelados.add(mensaje.id);
+      console.warn(`${LOG} cancelación recibida para #${mensaje.id}`);
+    }
+    return;
+  }
+
+  cadena = cadena.then(() => atender(mensaje)).catch((error) => {
+    console.error(`${LOG} fallo no capturado en la cadena:`, error);
+  });
 };
 
 // self.onerror NO captura promesas rechazadas sin manejar: si una se escapa,

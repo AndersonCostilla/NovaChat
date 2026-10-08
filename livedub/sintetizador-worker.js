@@ -20,11 +20,12 @@ import { pipeline, env } from './libs/transformers/transformers.min.js';
 import { trocearEnOraciones } from './segmentador.js';
 import { VOZ, archivoOnnxVoz } from './messages.js';
 
-const ENTRADA = { INIT: 'INIT', SINTETIZAR: 'SINTETIZAR' };
+const ENTRADA = { INIT: 'INIT', SINTETIZAR: 'SINTETIZAR', CANCELAR: 'CANCELAR' };
 const SALIDA = {
   PROGRESO: 'PROGRESO',
   LISTO: 'LISTO',
   RESULTADO: 'RESULTADO',
+  CANCELADO: 'CANCELADO', // acuse de una frase abandonada: libera el hueco
   ERROR: 'ERROR'
 };
 
@@ -184,6 +185,12 @@ function concatenar(ondas, hz) {
 }
 
 async function sintetizar({ id, texto }) {
+  if (estaCancelado(id)) {
+    cancelados.delete(id);
+    console.warn(`${LOG} frase #${id}: cancelada antes de empezar.`);
+    self.postMessage({ type: SALIDA.CANCELADO, id });
+    return;
+  }
   const inicio = performance.now();
   const modelo = await cargarModelo();
 
@@ -200,6 +207,14 @@ async function sintetizar({ id, texto }) {
   const ondas = [];
   let hz = 16000;
   for (const trozo of trozos) {
+    // Se abandona entre oraciones si el orquestador ya dio la frase por
+    // perdida: así no se gasta el núcleo en algo que nadie va a escuchar.
+    if (estaCancelado(id)) {
+      cancelados.delete(id);
+      console.warn(`${LOG} frase #${id}: abandonada a mitad (cancelada).`);
+      self.postMessage({ type: SALIDA.CANCELADO, id });
+      return;
+    }
     const salida = await modelo(trozo);
     const onda = salida?.audio;
     if (onda && onda.length) {
@@ -250,8 +265,7 @@ async function sintetizar({ id, texto }) {
 /* Protocolo de mensajes                                               */
 /* ------------------------------------------------------------------ */
 
-self.onmessage = async (evento) => {
-  const mensaje = evento.data || {};
+async function atender(mensaje) {
 
   try {
     switch (mensaje.type) {
@@ -279,6 +293,47 @@ self.onmessage = async (evento) => {
       error: String(error?.message || error)
     });
   }
+}
+
+/* ------------------------------------------------------------------ */
+/* Serialización y cancelación (arreglo de colas, 7-oct-2026)          */
+/* ------------------------------------------------------------------ */
+//
+// EL DEFECTO QUE ESTO CORRIGE
+// `self.onmessage = async (...)` NO espera a terminar antes de atender el
+// mensaje siguiente: un `async` devuelve el control en el primer `await`. Si
+// el orquestador daba una tarea por perdida y mandaba otra, las DOS corrían a
+// la vez repartiéndose el único núcleo, y cada una tardaba el doble. Esa era
+// la causa de que el coste pasara de ~2.000 a ~3.600 ms por segundo de audio.
+//
+// Ahora los trabajos se encadenan: nunca hay dos a la vez.
+let cadena = Promise.resolve();
+
+// Ids que el orquestador ha dado por perdidos. No se puede interrumpir una
+// llamada a ONNX ya en marcha, pero sí evitar empezarla y abandonar entre
+// oraciones, que es donde está casi todo el tiempo de una frase larga.
+const cancelados = new Set();
+
+function estaCancelado(id) {
+  return id !== undefined && id !== null && cancelados.has(id);
+}
+
+self.onmessage = (evento) => {
+  const mensaje = evento.data || {};
+
+  // CANCELAR se atiende AL INSTANTE, sin pasar por la cadena: si esperase su
+  // turno llegaría después del trabajo que pretende cancelar.
+  if (mensaje.type === ENTRADA.CANCELAR) {
+    if (mensaje.id !== undefined && mensaje.id !== null) {
+      cancelados.add(mensaje.id);
+      console.warn(`${LOG} cancelación recibida para #${mensaje.id}`);
+    }
+    return;
+  }
+
+  cadena = cadena.then(() => atender(mensaje)).catch((error) => {
+    console.error(`${LOG} fallo no capturado en la cadena:`, error);
+  });
 };
 
 // self.onerror no captura promesas rechazadas sin manejar.
