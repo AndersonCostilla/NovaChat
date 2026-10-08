@@ -356,6 +356,138 @@ bloque('Whisper: ¿coste fijo por frase o proporcional a la duración?');
     crearCronometro().resumen().frases === 0);
 }
 
+bloque('PUNTO 3: una frase fallida no descuadra el hueco de la siguiente');
+{
+  // Reproduce el -117 % de la fila #22: la frase que falla se cierra al
+  // instante, mientras la anterior sigue hablando y se cierra después.
+  const reloj = relojFalso(0);
+  const crono = crearCronometro({ ahora: reloj.ahora });
+
+  // Frase A llega en t=12000 y hablará largo.
+  reloj.fijar(12000);
+  crono.abrir(1, { tInicioHabla: 0, segundosAudio: 12, motivoCierre: MOTIVO_CIERRE.TOPE });
+  reloj.fijar(18000);
+  crono.marcar(1, 'tFinAsr');
+  crono.marcar(1, 'tFinMt');
+  crono.marcar(1, 'tInicioVoz');
+
+  // Frase B llega en t=24000 y FALLA al instante: se cierra la primera.
+  reloj.fijar(24000);
+  crono.abrir(2, { tInicioHabla: 12000, segundosAudio: 12, motivoCierre: MOTIVO_CIERRE.TOPE });
+  reloj.fijar(24100);
+  crono.abandonar(2, 'NO se intentó traducir: el texto no parece inglés');
+
+  // Y AHORA se cierra la A, después de la B.
+  reloj.fijar(31000);
+  crono.marcar(1, 'tFinVoz');
+  crono.cerrar(1);
+
+  const filas = crono.filas();
+  const a1 = filas.find((f) => f['#'] === 1);
+  const b1 = filas.find((f) => f['#'] === 2);
+
+  comprobar('el historial quedó desordenado (la fallida cerró antes)',
+    filas[0]['#'] === 2 && filas[1]['#'] === 1);
+  comprobar(
+    'aun así el hueco de la frase 2 es POSITIVO',
+    b1['hueco disponible (s)'] === 12,
+    String(b1['hueco disponible (s)'])
+  );
+  comprobar(
+    'y la ocupación de la frase 1 NO sale negativa',
+    a1['ocupación (%)'] === null || a1['ocupación (%)'] > 0,
+    String(a1['ocupación (%)'])
+  );
+  comprobar(
+    'la primera frase no tiene hueco (no hay anterior)',
+    a1['hueco disponible (s)'] === null
+  );
+}
+
+bloque('PUNTO 4: el límite teórico con Whisper y traducción a 0 ms');
+{
+  const crono = simularTuberia({
+    duracionFrase: 12030,
+    duracionVoz: 13350,
+    computo: 6230,
+    frases: 10
+  });
+  const r = crono.resumen();
+
+  comprobar(
+    'la ocupación a 0 ms es IDÉNTICA a la real',
+    r['ocupación si Whisper y traducción costaran 0 ms (%)'] === r['OCUPACIÓN del canal de voz (%)'],
+    `${r['ocupación si Whisper y traducción costaran 0 ms (%)']} vs ${r['OCUPACIÓN del canal de voz (%)']}`
+  );
+  comprobar(
+    'y sigue por encima del 100 %',
+    r['ocupación si Whisper y traducción costaran 0 ms (%)'] > 100
+  );
+  comprobar(
+    'calcula cuánto se acumula por frase',
+    r['atraso que se acumula por frase (s)'] === 1.32,
+    String(r['atraso que se acumula por frase (s)'])
+  );
+  comprobar(
+    'el veredicto dice que acelerar el proceso NO evita la pérdida',
+    /ninguna optimización de Whisper o de la traducción puede evitar la pérdida/.test(
+      crono.veredictoLimiteTeorico()
+    ),
+    crono.veredictoLimiteTeorico().slice(0, 80)
+  );
+
+  // Y el caso contrario: si cabe, acelerar sí sirve.
+  const holgado = simularTuberia({
+    duracionFrase: 12030,
+    duracionVoz: 8000,
+    computo: 6230,
+    frases: 10
+  });
+  comprobar(
+    'si el doblaje cabe, el veredicto dice que acelerar sí ayuda',
+    /no habría pérdida/.test(holgado.veredictoLimiteTeorico()),
+    holgado.veredictoLimiteTeorico().slice(0, 80)
+  );
+}
+
+bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
+{
+  const crono = crearCronometro();
+  comprobar('sin pérdidas, lo dice', crono.resumenPerdidas()['frases perdidas'] === 0);
+
+  crono.anotarPerdida({ id: 5, segundos: 12.03, etapa: 'transcripción', detalle: 'cola llena' });
+  crono.anotarPerdida({ id: 9, segundos: 11.5, etapa: 'cola de voz', detalle: 'iba retrasado' });
+  crono.anotarPerdida({ id: 12, segundos: 12.0, etapa: 'transcripción', detalle: 'cola llena' });
+
+  const r = crono.resumenPerdidas();
+  comprobar('cuenta las 3 pérdidas', r['frases perdidas'] === 3);
+  comprobar(
+    'suma los segundos de vídeo sin doblar',
+    r['segundos de vídeo sin doblar'] === 35.5,
+    String(r['segundos de vídeo sin doblar'])
+  );
+  comprobar('las agrupa por etapa', r['por etapa']['transcripción'] === 2 && r['por etapa']['cola de voz'] === 1);
+  comprobar('y guarda el detalle', r.detalle.length === 3);
+}
+
+{
+  // Una pérdida de una frase ABIERTA la cierra con el motivo real.
+  const reloj = relojFalso(0);
+  const crono = crearCronometro({ ahora: reloj.ahora });
+  reloj.fijar(5000);
+  crono.abrir(1, { tInicioHabla: 0, segundosAudio: 5, motivoCierre: MOTIVO_CIERRE.SILENCIO });
+  crono.anotarPerdida({ id: 1, segundos: 5, etapa: 'cola de voz', detalle: 'se tiró la más antigua' });
+
+  comprobar('la frase abierta se cierra', crono.vivas() === 0);
+  const fila = crono.filas()[0];
+  comprobar(
+    'y aparece en la tabla marcada como PERDIDA',
+    /PERDIDA en cola de voz/.test(fila.resultado),
+    fila.resultado
+  );
+  comprobar('sin desfase inventado', fila['DESFASE desde FIN (s)'] === null);
+}
+
 console.log(`\n==========================================================`);
 console.log(`Resultado: ${pasadas} pasadas, ${fallidas} fallidas`);
 console.log(`==========================================================`);

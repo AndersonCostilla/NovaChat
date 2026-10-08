@@ -44,6 +44,13 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
   const historial = [];
 
   let activo = true;
+  // Último instante en que se cerró una frase en el VAD. Sirve para medir el
+  // hueco de llegada en orden, sin depender de cuándo acabe cada frase.
+  let ultimoFinHabla = null;
+
+  // Contadores de CONTENIDO PERDIDO, por etapa. No son lo mismo que un
+  // retraso: esto es audio del vídeo que nadie va a oír doblado.
+  const perdidas = [];
 
   /**
    * Una frase acaba de cerrarse en el VAD y sale hacia Whisper.
@@ -54,10 +61,26 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    */
   function abrir(id, { tInicioHabla, segundosAudio, motivoCierre }) {
     if (!activo || id === undefined || id === null) return;
+
+    // EL HUECO SE MIDE AQUÍ, AL LLEGAR LA FRASE, NO AL CERRARLA.
+    //
+    // Antes se calculaba en cerrar() contra la última frase del historial, y
+    // eso daba huecos NEGATIVOS: una frase que falla (p. ej. no se traduce)
+    // se cierra al instante, mientras que la anterior sigue hablando y se
+    // cierra después. El historial quedaba desordenado y la resta salía al
+    // revés. Es lo que producía el -117 % de la fila #22.
+    //
+    // El orden de LLEGADA sí es siempre monótono, así que el hueco medido
+    // aquí no puede salir negativo pase lo que pase aguas abajo.
+    const tFinHabla = ahora();
+    const intervaloMs = ultimoFinHabla === null ? null : tFinHabla - ultimoFinHabla;
+    ultimoFinHabla = tFinHabla;
+
     vivas.set(id, {
       id,
       tInicioHabla,
-      tFinHabla: ahora(),
+      tFinHabla,
+      intervaloMs,
       segundosAudio,
       motivoCierre,
       tFinAsr: null,
@@ -87,12 +110,6 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     if (!f) return null;
     vivas.delete(id);
     f.motivoFinal = motivoFinal;
-
-    // Hueco entre el final de la frase ANTERIOR y el de ésta: es el tiempo
-    // real que el sistema tuvo para despachar la anterior. Se mide sobre
-    // tFinHabla porque es el instante en que empieza el trabajo de cada una.
-    const previa = historial[historial.length - 1];
-    f.intervaloMs = previa ? f.tFinHabla - previa.tFinHabla : null;
     historial.push(f);
     while (historial.length > MAX_FRASES) historial.shift();
     return f;
@@ -219,6 +236,25 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       'el español dura x veces el original':
         mediana(expansiones) === null ? null : Number(mediana(expansiones).toFixed(2)),
       'frases descartadas por retraso': descartadas,
+
+      // ─── LÍMITE TEÓRICO ──────────────────────────────────────────
+      // Qué pasaría si Whisper y la traducción fueran INSTANTÁNEOS.
+      //
+      // La ocupación es duración_del_doblaje ÷ hueco_entre_frases. Ninguno
+      // de los dos términos depende de lo que tarde el procesamiento: el
+      // hueco lo marca el VAD sobre el audio que entra, y la duración del
+      // doblaje la marca lo que tarda la voz en leer el texto. Por eso la
+      // cifra de abajo es IDÉNTICA a la de arriba: acelerar Whisper y la
+      // traducción no cambia la ocupación ni un punto.
+      'ocupación si Whisper y traducción costaran 0 ms (%)':
+        ocupacionMediana === null ? null : Math.round(ocupacionMediana),
+      'atraso que se acumula por frase (s)':
+        mediana(duracionVoz) === null || mediana(intervalos) === null
+          ? null
+          : segundos(mediana(duracionVoz) - mediana(intervalos)),
+      'lo que SÍ ganaría un procesamiento instantáneo (s)':
+        segundos((mediana(asr) || 0) + (mediana(mt) || 0)),
+
       VEREDICTO: veredictoCapacidad(ocupacionMediana, descartadas),
 
       // ─── ¿Es el coste de Whisper fijo o proporcional? ────────────
@@ -248,6 +284,41 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       );
     }
     return 'HAY MARGEN: el canal de voz va al ' + Math.round(ocupacion) + ' %.';
+  }
+
+  /**
+   * El párrafo que responde a la pregunta del límite teórico. Se escribe
+   * aquí, en el código, para que la conclusión no dependa de que alguien
+   * interprete bien una tabla.
+   */
+  function veredictoLimiteTeorico() {
+    const r = resumen();
+    const ocup = r['OCUPACIÓN del canal de voz (%)'];
+    if (ocup === null) return 'Sin datos suficientes para el límite teórico.';
+
+    const ganancia = r['lo que SÍ ganaría un procesamiento instantáneo (s)'];
+    const crecimiento = r['atraso que se acumula por frase (s)'];
+
+    if (ocup < 100) {
+      return (
+        `Con Whisper y traducción a 0 ms la ocupación seguiría siendo del ${ocup} % ` +
+        '(no depende de ellos), pero como está por debajo del 100 % el sistema cabe: ' +
+        `acelerar el procesamiento ahorraría ${ganancia} s de desfase constante y no habría pérdida.`
+      );
+    }
+
+    return [
+      `LÍMITE TEÓRICO: aunque Whisper y la traducción fueran INSTANTÁNEOS, la ocupación`,
+      `seguiría siendo del ${ocup} %, porque no depende de ellos: es la duración del`,
+      'doblaje dividida por el hueco entre frases.',
+      `El atraso seguiría creciendo ${crecimiento} s por frase y la pérdida de contenido`,
+      'seguiría ocurriendo igual.',
+      `Acelerar el procesamiento sólo recortaría ${ganancia} s de desfase CONSTANTE`,
+      '(una vez, no de forma acumulativa).',
+      'CONCLUSIÓN: ninguna optimización de Whisper o de la traducción puede evitar la',
+      'pérdida de contenido en habla continua. El problema es la proporción entre el',
+      'español y el original, no la velocidad de cálculo.'
+    ].join(' ');
   }
 
   /**
@@ -319,9 +390,34 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     return lineas.join('\n');
   }
 
+  /** Registra contenido perdido en cualquier etapa de la tubería. */
+  function anotarPerdida({ id = null, segundos = null, etapa = 'desconocida', detalle = '' }) {
+    perdidas.push({ id, segundos, etapa, detalle, cuando: ahora() });
+    while (perdidas.length > MAX_FRASES * 2) perdidas.shift();
+    // Si la frase estaba abierta, se cierra con el motivo real.
+    if (id !== null && vivas.has(id)) cerrar(id, { motivoFinal: `PERDIDA en ${etapa}: ${detalle}` });
+  }
+
+  function resumenPerdidas() {
+    const porEtapa = {};
+    let segundosTotales = 0;
+    for (const p of perdidas) {
+      porEtapa[p.etapa] = (porEtapa[p.etapa] || 0) + 1;
+      if (typeof p.segundos === 'number') segundosTotales += p.segundos;
+    }
+    return {
+      'frases perdidas': perdidas.length,
+      'segundos de vídeo sin doblar': Number(segundosTotales.toFixed(1)),
+      'por etapa': porEtapa,
+      detalle: perdidas.slice(-10)
+    };
+  }
+
   function reiniciar() {
     vivas.clear();
     historial.length = 0;
+    perdidas.length = 0;
+    ultimoFinHabla = null;
     console.log(`${LOG} mediciones borradas.`);
   }
 
@@ -330,9 +426,13 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     marcar,
     cerrar,
     abandonar,
+    anotarPerdida,
+    resumenPerdidas,
+    perdidas: () => perdidas.length,
     filas,
     resumen,
     explicacion,
+    veredictoLimiteTeorico,
     reiniciar,
     activar: (v) => {
       activo = Boolean(v);

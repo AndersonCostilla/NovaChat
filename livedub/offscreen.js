@@ -327,6 +327,13 @@ async function montarTranscriptor() {
         detalle: ocupado ? 'Transcribiendo la última frase…' : 'Modelo listo'
       }),
     onResultado: (resultado) => traducirYPublicar(resultado),
+    onDescartada: (info) =>
+      registrarPerdida({
+        id: info.id,
+        segundos: info.segundos,
+        etapa: info.etapa,
+        detalle: 'Whisper no daba abasto y la cola se desbordó'
+      }),
     onError: (error) => console.warn('[LiveDub] Error transcribiendo una frase:', error)
   });
 
@@ -584,6 +591,36 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
   });
 }
 
+/**
+ * PÉRDIDA DE CONTENIDO. Un sitio único por el que pasa todo lo que el
+ * usuario no va a llegar a oír doblado.
+ *
+ * Esto NO es un retraso: es audio del vídeo que se tira. La regla del
+ * proyecto es que nunca haya fallo silencioso, así que además de contarlo
+ * se avisa al popup. Antes, el descarte de la cola de Whisper no dejaba
+ * rastro en ningún sitio.
+ */
+function registrarPerdida({ id = null, segundos = null, etapa, detalle = '' }) {
+  cronometro.anotarPerdida({ id, segundos, etapa, detalle });
+  const total = cronometro.perdidas();
+
+  console.warn(
+    `[LiveDub] ⚠ CONTENIDO PERDIDO en ${etapa}` +
+      (segundos ? ` (${segundos} s de vídeo)` : '') +
+      `. Van ${total} en esta sesión. Detalle con livedub.perdidas()`
+  );
+
+  publicarEstadoModelo(
+    {
+      estado: ESTADO_MODELO_UI.ERROR,
+      detalle:
+        `Se han perdido ${total} frase(s) sin doblar: el doblaje no da abasto. ` +
+        'Mira livedub.perdidas() en la consola.'
+    },
+    MODULO.SINTESIS
+  );
+}
+
 // Pide la voz al motor activo. El ducking lo hace el propio motor.
 async function doblar(textoEspanol, segundosOrigen = null, idFrase = null) {
   const resultado = await (motorVoz?.doblar(textoEspanol, {
@@ -596,7 +633,18 @@ async function doblar(textoEspanol, segundosOrigen = null, idFrase = null) {
   // Nunca en silencio: si no hay voz, se dice por qué.
   if (!resultado.hablado) {
     console.warn(`[LiveDub] Sin doblaje para esta frase (${resultado.motivo || 'motivo desconocido'}).`);
-    cronometro.abandonar(idFrase, resultado.motivo || 'no sonó');
+    // Un descarte por cola llena es PÉRDIDA DE CONTENIDO, no un simple
+    // "no sonó": esa frase ya no se va a recuperar nunca.
+    if (resultado.descartada) {
+      registrarPerdida({
+        id: idFrase,
+        segundos: segundosOrigen,
+        etapa: 'cola de voz',
+        detalle: 'el doblaje iba tan retrasado que se tiró la frase más antigua'
+      });
+    } else {
+      cronometro.abandonar(idFrase, resultado.motivo || 'no sonó');
+    }
     return;
   }
 
@@ -946,6 +994,30 @@ globalThis.livedub = {
     const lineas = [cols.join(' | '), cols.map(() => '---').join(' | ')];
     for (const f of filas) lineas.push(cols.map((c) => String(f[c] ?? '')).join(' | '));
     const texto = lineas.join('\n') + '\n\n' + cronometro.explicacion();
+    console.log(texto);
+    return texto;
+  },
+
+  // Qué contenido se ha perdido y dónde. Uso: livedub.perdidas()
+  perdidas: () => {
+    const r = cronometro.resumenPerdidas();
+    if (!r['frases perdidas']) {
+      console.log('[LiveDub] ✔ No se ha perdido ninguna frase en esta sesión.');
+      return r;
+    }
+    console.warn(
+      `[LiveDub] ⚠ ${r['frases perdidas']} frases perdidas ` +
+        `(~${r['segundos de vídeo sin doblar']} s de vídeo sin doblar).`
+    );
+    console.table(r['por etapa']);
+    console.table(r.detalle);
+    return r;
+  },
+
+  // El límite teórico: qué pasaría si Whisper y la traducción fueran
+  // instantáneos. Uso: livedub.limiteTeorico()
+  limiteTeorico: () => {
+    const texto = cronometro.veredictoLimiteTeorico();
     console.log(texto);
     return texto;
   },

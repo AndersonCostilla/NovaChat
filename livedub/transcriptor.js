@@ -20,7 +20,7 @@ const RUTA_WORKER = 'transcriptor-worker.js';
 const MAX_EN_COLA = 2; // frases esperando; por encima, se tira la más antigua
 const TIMEOUT_MS = 120000; // 2 min por frase: si no, damos el intento por perdido
 
-export function crearTranscriptor({ onEstado, onActividad, onResultado, onError } = {}) {
+export function crearTranscriptor({ onEstado, onActividad, onResultado, onError, onDescartada } = {}) {
   let worker = null;
   let estado = ESTADO_MODELO.INACTIVO;
   let siguienteId = 1;
@@ -143,7 +143,22 @@ export function crearTranscriptor({ onEstado, onActividad, onResultado, onError 
     cola.push({ id, audio, idioma });
 
     // Descartamos lo más viejo si nos estamos quedando atrás.
-    while (cola.length > MAX_EN_COLA) cola.shift();
+    //
+    // ESTO ERA UN DESCARTE COMPLETAMENTE SILENCIOSO: la frase recibía un id,
+    // se la daba por aceptada a quien llamaba, y luego desaparecía sin dejar
+    // rastro en ningún log ni en ninguna medición. Audio del vídeo que no se
+    // transcribía, no se traducía, no se doblaba y de cuya existencia nadie
+    // se enteraba. Ahora se avisa siempre.
+    while (cola.length > MAX_EN_COLA) {
+      const viejo = cola.shift();
+      const segundos = (viejo.audio.length / 16000).toFixed(2);
+      console.warn(
+        `[LiveDub][transcriptor] ⚠ DESCARTADA la frase #${viejo.id} (${segundos} s de audio) SIN transcribir: ` +
+          `había ${MAX_EN_COLA + 1} esperando y Whisper no da abasto. ` +
+          'Ese trozo del vídeo no va a aparecer ni en subtítulos ni en voz.'
+      );
+      onDescartada?.({ id: viejo.id, segundos: Number(segundos), etapa: 'transcripción' });
+    }
 
     procesarCola();
     return id;
