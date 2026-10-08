@@ -131,12 +131,21 @@ export const VOZ = {
   // true  = onnx/model_quantized.onnx (38 MB, int8)
   // false = onnx/model.onnx           (114 MB, float32)
   //
-  // Contra toda intuición, en VITS la versión CUANTIZADA puede ser la LENTA:
-  // su decodificador es casi todo convoluciones, y ONNX Runtime no ejecuta
-  // varias de ellas en int8, así que inserta conversiones int8↔float32 en
-  // cada capa. El ejemplo oficial del modelo usa float32 por algo.
-  // Cambia esta línea, recarga la extensión y compara con livedub.rendimiento().
-  USAR_CUANTIZADO: false,
+  // MEDIDO EL 7-OCT-2026 EN UN i5-12400, NO SUPUESTO:
+  //
+  //   int8    (quantized) → ~3.550 ms por segundo de audio
+  //   float32 (completo)  → ~4.057 ms por segundo de audio
+  //
+  // Se probó float32 porque en VITS la cuantización int8 PUEDE salir lenta
+  // (decodificador convolucional + conversiones que ONNX Runtime inserta en
+  // las capas que no soporta en int8). La hipótesis era razonable y resultó
+  // FALSA en este equipo: float32 fue un 14 % peor, además de pesar 3 veces
+  // más. Se vuelve a int8.
+  //
+  // El interruptor se conserva porque la relación puede invertirse en otro
+  // equipo o con otra versión de onnxruntime. Para compararlo: cambia esta
+  // línea, recarga la extensión y mira livedub.rendimiento().
+  USAR_CUANTIZADO: true,
 
   ARCHIVO_CUANTIZADO: 'onnx/model_quantized.onnx',
   ARCHIVO_COMPLETO: 'onnx/model.onnx',

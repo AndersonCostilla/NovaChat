@@ -35,19 +35,22 @@ ARCHIVOS=(
   # cambiar VOZ.USAR_CUANTIZADO en livedub/messages.js y recargar: no hay que
   # volver a descargar nada.
   #
-  #   model_quantized.onnx → ~38 MB, int8.
-  #   model.onnx           → ~114 MB, float32. En VITS suele ser el RÁPIDO,
-  #                          porque su decodificador es casi todo
-  #                          convoluciones y ONNX Runtime no las ejecuta en
-  #                          int8: mete conversiones de ida y vuelta en cada
-  #                          capa. El ejemplo oficial del modelo usa float32.
+  #   model_quantized.onnx → ~38 MB, int8. EL QUE SE USA.
+  #   model.onnx           → ~114 MB, float32. OPCIONAL, sólo para comparar.
+  #
+  # Se midió en un i5-12400 (7-oct-2026): int8 ~3.550 ms por segundo de audio,
+  # float32 ~4.057. Es decir, el grande es un 14 % MÁS LENTO además de pesar
+  # el triple. Por eso está en OPCIONALES: si la descarga falla o la cancelas,
+  # el script termina bien igual.
   "onnx/model_quantized.onnx"
   "onnx/model.onnx"
 )
 
 # Archivos que, si faltan, NO deben hacer fracasar el script: algunos repos
 # publican tokenizer.json en lugar de los .spm, o no traen generation_config.
-OPCIONALES=()
+OPCIONALES=(
+  "onnx/model.onnx"
+)
 
 MINIMO_JSON=50
 MINIMO_ONNX=500000
@@ -126,8 +129,8 @@ echo
 echo "Modelo de voz completo (los DOS motores: int8 y float32)."
 echo
 echo "Motor activo ahora mismo: mira VOZ.USAR_CUANTIZADO en livedub/messages.js"
-echo "   false -> onnx/model.onnx           (114 MB, float32)  <- por defecto"
-echo "   true  -> onnx/model_quantized.onnx (38 MB,  int8)"
+echo "   true  -> onnx/model_quantized.onnx (38 MB,  int8)     <- por defecto"
+echo "   false -> onnx/model.onnx           (114 MB, float32)  (medido: mas lento)"
 echo
 echo "Recarga la extensión en chrome://extensions y vuelve a Iniciar."
 echo "Con el doblaje activo, escribe  livedub.rendimiento()  en la consola del"

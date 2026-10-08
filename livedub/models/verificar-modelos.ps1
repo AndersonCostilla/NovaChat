@@ -58,7 +58,11 @@ $Modelos = @(
             'config.json',
             'tokenizer.json',
             'tokenizer_config.json',
-            'onnx\model_quantized.onnx',
+            'onnx\model_quantized.onnx'
+        )
+        # model.onnx (float32, 114 MB) es OPCIONAL: se midió mas lento que el
+        # cuantizado. Si esta, se comprueba; si no esta, no es un problema.
+        Opcionales = @(
             'onnx\model.onnx'
         )
     }
@@ -97,6 +101,20 @@ foreach ($modelo in $Modelos) {
         else {
             Write-Host ("  OK        {0}  ({1} bytes)" -f $relativa, $legible) -ForegroundColor Green
         }
+    }
+
+    # Opcionales: se informa, pero su ausencia NO cuenta como problema.
+    foreach ($relativa in @($modelo.Opcionales)) {
+        if (-not $relativa) { continue }
+        $ruta = Join-Path $base $relativa
+
+        if (-not (Test-Path $ruta)) {
+            Write-Host ("  ausente   {0}  (opcional, no hace falta)" -f $relativa) -ForegroundColor DarkGray
+            continue
+        }
+
+        $bytes = (Get-Item $ruta).Length
+        Write-Host ("  OK        {0}  ({1:N0} bytes, opcional)" -f $relativa, $bytes) -ForegroundColor Green
     }
 }
 

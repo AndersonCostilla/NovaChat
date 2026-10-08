@@ -113,8 +113,7 @@ soporta. El resultado puede ser más lento que no cuantizar nada, con peor
 calidad de voz además. El ejemplo oficial de `Xenova/mms-tts-spa` usa
 `quantized: false`.
 
-**Es una hipótesis, no un hecho medido.** Por eso el motor es conmutable y hay
-un banco de medición: para decidirlo con datos en vez de con teoría.
+**Era una hipótesis, y se midió. Resultó FALSA.** Ver §8.
 
 ### Por qué acelerar la reproducción y no la síntesis
 
@@ -165,16 +164,66 @@ En la consola del **documento offscreen**:
 
 ---
 
-## 7. Lo que sigue sin saberse
+## 7. Resultado de la medición — hipótesis refutada
 
-- **Si float32 es realmente más rápido que int8 aquí.** Es la hipótesis
-  central de esta fase y **no está verificada**. Sólo lo dirá una medición en
-  Chrome real.
-- **Cuánto se gana con las tres medidas juntas.** Si float32 da un 2× y la
-  aceleración + la pausa recortan un 20 % de duración, el i5-12400 quedaría
-  cerca de `justo`. Es aritmética esperanzada, no una medición.
-- **Cuánta CPU le está robando el doblaje a la transcripción.** Se puede medir
-  comparando la latencia de transcripción con el doblaje encendido y apagado.
-- Si nada de esto alcanza, la conclusión honesta es que **el doblaje en tiempo
-  real no cabe en un solo hilo de WebAssembly** junto a Whisper y un traductor,
-  y así habrá que escribirlo.
+**Medido el 7 de octubre de 2026, mismo i5-12400, con el motor float32:**
+
+| | int8 (cuantizado) | float32 (completo) |
+|---|---|---|
+| Tamaño | 38 MB | 114 MB |
+| ms por segundo de audio | ~3.550 | **4.057** |
+| Veredicto | insuficiente | insuficiente |
+
+**float32 no mejoró: empeoró un ~14 %**, además de pesar el triple. La
+hipótesis del §4 (que las conversiones int8↔float32 penalizasen más que la
+propia cuantización) **era razonable y era falsa en este equipo**.
+
+> Queda escrito porque es el resultado más útil de esta fase: evita que alguien
+> vuelva a gastar 114 MB y una tarde en la misma idea.
+
+El interruptor `VOZ.USAR_CUANTIZADO` se conserva —la relación podría invertirse
+en otro equipo o con otra versión de onnxruntime— pero **vuelve a int8 por
+defecto** y `model.onnx` pasa a ser una descarga **opcional**.
+
+### Lo que SÍ funcionó
+
+| Medida | Antes | Después |
+|---|---|---|
+| Expansión (duración del doblaje ÷ original) | **1,7×** | **1,14×** |
+
+Acelerar a 1,2× y recortar los silencios **eliminaron casi todo el problema de
+duración** (§2.2). De los dos problemas del diagnóstico, uno queda resuelto.
+
+El que no se puede resolver es el otro: la velocidad bruta de síntesis en un
+solo hilo de WebAssembly. Y ése no tiene arreglo por software en este diseño.
+
+### La comparación no es de laboratorio
+
+Las dos pasadas usaron material distinto y un estado térmico distinto. Un 14 %
+de diferencia **no sería concluyente** si estuviésemos afinando. Pero aquí no
+buscamos un 14 %: **hacía falta un 400 %**. Ninguna de las dos cifras se acerca,
+y por eso la conclusión sí es firme.
+
+---
+
+## 8. Decisión final (Anderson, 7-oct-2026)
+
+El doblaje por voz queda como **función EXPERIMENTAL, desactivada por
+defecto**, con la detección automática y el mensaje honesto ya construidos.
+No se sigue optimizando.
+
+**Única vía futura identificada:** WebAssembly **multihilo**. Requiere
+vendorizar `ort-wasm-simd-threaded.wasm` y conseguir aislamiento de origen
+cruzado en una extensión MV3. Con 4 hilos efectivos el cálculo entraría en el
+rango de lo viable. **No es tarea actual**: está anotado en `docs/TODO.md` como
+posible mejora futura, no como pendiente.
+
+---
+
+## 9. Lo que sigue sin saberse
+
+- **Cuánta CPU le roba el doblaje a la transcripción.** Es lo único que podría
+  afectar a lo que sí funciona bien. Bloque D de
+  `docs/PRUEBA-NIVEL2-FASE5.1.md`.
+- **Si la velocidad de 1,2× es la mejor al oído.** Queda en su valor por
+  defecto; sólo importa a quien tenga un equipo que aguante el doblaje.

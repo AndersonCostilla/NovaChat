@@ -143,7 +143,13 @@ Requiere **Chrome 116 o superior** (por `chrome.runtime.getContexts`).
 3. El estado pasa a *Capturando* y la barra de nivel se mueve con el audio.
 4. Pulsa **Detener** para liberar todo.
 
-## Doblaje por voz (Fase 5)
+## Doblaje por voz (Fase 5) — ⚠ EXPERIMENTAL
+
+> **Estado: experimental, desactivado por defecto.** Está construido y es
+> correcto, pero **medido en un Intel i5-12400 no es viable**: la síntesis
+> tarda ~3,5 s en generar 1 s de voz, así que el doblaje se retrasa hasta
+> perderse. No se sigue optimizando. Los subtítulos no dependen de esto y
+> funcionan perfectamente sin ello.
 
 Marca **«Leer traducción en voz alta»** en el popup. LiveDub genera la voz en
 español con MMS-TTS (local, ~38 MB) y **baja el volumen del vídeo al 18 %**
@@ -182,18 +188,19 @@ Los subtítulos no dependen de nada de esto y siguen funcionando igual.
 
 El script de descarga baja **los dos** archivos del modelo:
 
-| Archivo | Tamaño | Cuándo |
-|---|---|---|
-| `onnx/model.onnx` | ~114 MB | **Por defecto.** float32 |
-| `onnx/model_quantized.onnx` | ~38 MB | int8 |
+| Archivo | Tamaño | Medido | Cuándo |
+|---|---|---|---|
+| `onnx/model_quantized.onnx` | ~38 MB | **~3.550 ms/s** | **Por defecto.** int8 |
+| `onnx/model.onnx` | ~114 MB | 4.057 ms/s | Opcional, sólo para comparar |
 
 Se alterna con **una sola línea**, `VOZ.USAR_CUANTIZADO` en
 [`messages.js`](messages.js), sin volver a descargar nada.
 
-Contra toda intuición, en VITS **la versión cuantizada puede ser la lenta**:
-su decodificador es casi todo convoluciones y ONNX Runtime no ejecuta varias
-de ellas en int8, así que mete conversiones en cada capa. El ejemplo oficial
-del modelo usa float32.
+Se probó float32 porque en VITS la cuantización int8 *puede* salir lenta
+(ONNX Runtime inserta conversiones en las capas que no soporta en int8).
+**Se midió y la hipótesis resultó falsa**: float32 fue un 14 % peor y pesa el
+triple. El interruptor se conserva por si la relación se invierte en otro
+equipo, pero la descarga del grande es opcional.
 
 ### Diagnóstico
 

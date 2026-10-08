@@ -340,3 +340,37 @@ Diagnóstico y decisiones completas en `docs/RENDIMIENTO-VOZ.md`.
 - **`MAX_FRASE_CHUNKS = 47` (12 s) es demasiado para doblar.** Frases de origen
   más cortas darían doblajes más cortos y menos retraso acumulado. Pero tocar
   el VAD está fuera de alcance por decisión del usuario; queda anotado.
+
+
+## Resultado de la Fase 5.1 y estado final del doblaje (7-oct-2026)
+
+**Medido:** int8 ~3.550 ms/s · float32 **4.057 ms/s**. La hipótesis de que
+float32 sería más rápido en VITS **es falsa en este equipo**. Se vuelve a int8
+y `model.onnx` pasa a descarga opcional.
+
+**Sí funcionó:** la expansión bajó de **1,7× a 1,14×** gracias al
+`playbackRate` y al recorte de silencios. De los dos problemas, el de duración
+queda resuelto; el de velocidad bruta no tiene arreglo en este diseño.
+
+**Decisión del usuario:** el doblaje queda como **función EXPERIMENTAL,
+desactivada por defecto**, con el veredicto automático. **No se sigue
+optimizando.**
+
+### Mejora futura (NO es tarea actual)
+
+- **WebAssembly multihilo.** Es la única vía identificada con margen real. Hoy
+  `wasm.numThreads = 1` en los tres workers, porque:
+  1. sólo está vendorizado `ort-wasm-simd.wasm`, no `ort-wasm-simd-threaded.wasm`;
+  2. hacen falta `SharedArrayBuffer` y aislamiento de origen cruzado, que una
+     extensión MV3 no obtiene de forma directa.
+  Con 4 hilos efectivos, los ~3.550 ms/s entrarían en el rango viable.
+  Beneficiaría **también** a Whisper y al traductor, no sólo a la voz.
+  Si algún día se aborda, empezar por comprobar si Chrome permite ya
+  `cross_origin_embedder_policy` en el manifiesto MV3.
+
+### Cerrado definitivamente (no reintentar)
+
+- **Cambiar de motor ONNX para acelerar la voz.** Medido en los dos sentidos.
+- **Recomendar un procesador concreto.** El monohilo varía ~1,3-1,5× entre
+  CPUs de consumo; hace falta más de 4×. Razonado en `docs/RENDIMIENTO-VOZ.md` §3.
+- **`speaking_rate` de VITS.** El bundle vendorizado no lo implementa.

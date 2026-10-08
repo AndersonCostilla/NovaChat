@@ -198,6 +198,22 @@ select {
   color: #9aa0a6;
 }
 
+/* Distintivo "EXPERIMENTAL" junto al interruptor de voz. Decisión de producto
+   (7-oct-2026): la función está construida y es correcta, pero no es viable en
+   hardware de gama media. Se marca en vez de esconderla o fingir que va. */
+.etiqueta-beta {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 5px;
+  border-radius: 3px;
+  background: #3a2f16;
+  color: #f0c674;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  vertical-align: middle;
+}
+
 /* Aviso destacado bajo el interruptor de voz. */
 .ayuda--alerta {
   color: #f0c674;

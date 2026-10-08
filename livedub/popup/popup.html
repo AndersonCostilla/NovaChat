@@ -44,16 +44,17 @@
     <section class="bloque">
       <label class="interruptor">
         <input type="checkbox" id="doblajeVoz" />
-        <span>Leer traducción en voz alta</span>
+        <span>Leer traducción en voz alta <span class="etiqueta-beta">EXPERIMENTAL</span></span>
       </label>
       <p class="ayuda">
         Genera la voz en español y baja el volumen del vídeo mientras habla.
-        <strong>Apagado de fábrica</strong>: añade varios segundos de retardo y
-        exige bastante CPU. Los subtítulos funcionan igual de bien sin esto.
+        <strong>No funciona en equipos de gama media</strong>: la síntesis no va
+        más rápida de lo que dura la voz que produce, así que el doblaje se
+        retrasa hasta perderse. Los subtítulos funcionan perfectamente sin esto.
       </p>
       <p class="ayuda" id="avisoDoblaje">
-        Requiere descargar aparte el modelo de voz. LiveDub mide tu equipo en
-        las primeras frases y, si no da abasto, apaga el doblaje y te lo dice.
+        LiveDub mide tu equipo en las primeras frases. Si no da abasto, apaga el
+        doblaje y te lo explica aquí mismo.
       </p>
     </section>
 

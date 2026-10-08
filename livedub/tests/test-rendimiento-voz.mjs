@@ -202,9 +202,11 @@ bloque('El interruptor de motor (VOZ.USAR_CUANTIZADO) resuelve bien el archivo')
 {
   comprobar('true  → model_quantized.onnx', archivoOnnxVoz(true) === 'onnx/model_quantized.onnx', archivoOnnxVoz(true));
   comprobar('false → model.onnx', archivoOnnxVoz(false) === 'onnx/model.onnx', archivoOnnxVoz(false));
+  // MEDIDO 7-oct-2026: int8 ~3.550 ms/s, float32 4.057 ms/s. La hipótesis de
+  // que float32 sería más rápido en VITS se probó y resultó falsa.
   comprobar(
-    'por defecto va el float32, que es la apuesta a medir',
-    VOZ.USAR_CUANTIZADO === false && archivoOnnxVoz() === 'onnx/model.onnx'
+    'por defecto va el int8, que es el que midió más rápido',
+    VOZ.USAR_CUANTIZADO === true && archivoOnnxVoz() === 'onnx/model_quantized.onnx'
   );
   comprobar(
     'la velocidad por defecto compensa la expansión del español',

@@ -172,7 +172,9 @@ real y empeora a 0,27×. Diagnóstico completo en `docs/RENDIMIENTO-VOZ.md`.
 | 10 | `onActividad(false)` no pisa el veredicto `insuficiente` | EJECUTADO (lectura + guarda explícita en `offscreen.js`) | guarda presente |
 | 11 | `popup.html` sin `<label>` anidados | EJECUTADO (recuento de apertura/cierre) | profundidad máxima 1 |
 | 12 | `verificar-modelos.ps1` cubre los **tres** modelos | EJECUTADO (lectura) | incluye `mms-tts-spa` con sus dos `.onnx` |
-| 13 | **Si float32 es más rápido que int8 en este equipo** | **PENDIENTE (humano) — es la hipótesis central** | sin medir |
-| 14 | Cuánto recorta la expansión acelerar a 1,2× | **PENDIENTE (humano)** | sin medir |
-| 15 | Si el tono a 1,2× resulta molesto al oído | **PENDIENTE (humano)** | criterio subjetivo |
-| 16 | `verificar-modelos.ps1` ejecutado en PowerShell real | **PENDIENTE (humano)** | no hay PowerShell en el sandbox |
+| 13 | **Si float32 es más rápido que int8 en este equipo** | VERIFICADO (humano, 7-oct-2026) | **NO. int8 ~3.550 ms/s · float32 4.057 ms/s → hipótesis refutada, se vuelve a int8** |
+| 14 | Cuánto recorta la expansión acelerar a 1,2× | VERIFICADO (humano, 7-oct-2026) | de **1,7× a 1,14×** — el problema de duración queda resuelto |
+| 15 | Si el tono a 1,2× resulta molesto al oído | **SIN PROBAR — sin relevancia** | el doblaje se desactiva antes de poder juzgarlo en este equipo |
+| 16 | `verificar-modelos.ps1` ejecutado en PowerShell real | VERIFICADO (humano, 7-oct-2026) | ejecutado con los 3 modelos |
+| 17 | El veredicto automático se dispara y se explica en el popup | VERIFICADO (humano, 7-oct-2026) | «insuficiente», 10 frases rechazadas sin intentarlas, mensaje mostrado |
+| 18 | Que el doblaje no degrade transcripción ni traducción | **PENDIENTE (humano)** | bloque D de `docs/PRUEBA-NIVEL2-FASE5.1.md` |
