@@ -30,7 +30,11 @@
 const LOG = '[LiveDub][cronómetro]';
 
 // Cuántas frases se guardan. 40 cubre de sobra una prueba de 5 minutos.
-const MAX_FRASES = 40;
+// Cuántas frases se guardan en la tabla. Subido de 40 a 200 el 8-oct-2026:
+// con 40, una tanda de 5 minutos (60-70 frases) perdía de vista la primera
+// mitad y las medianas sólo describían el final. Cada frase guardada son unos
+// pocos cientos de bytes, así que 200 no es nada y cubre una tanda larga.
+const MAX_FRASES = 200;
 
 export const MOTIVO_CIERRE = {
   SILENCIO: 'silencio',
@@ -51,6 +55,20 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
   // Contadores de CONTENIDO PERDIDO, por etapa. No son lo mismo que un
   // retraso: esto es audio del vídeo que nadie va a oír doblado.
   const perdidas = [];
+
+  // Ids que salieron de la tabla por antigüedad, no por pérdida.
+  //
+  // REGRESIÓN DEL 8-OCT-2026, Y ERA DE LA PROPIA VERIFICACIÓN. En una tanda
+  // de 61 frases SIN NINGUNA PÉRDIDA REAL, verificacionCruzada() decía
+  // "21 frases desaparecieron sin que ningún contador las recogiera". Las 21
+  // eran 61 − 40: las que el tope del historial había ido tirando por viejas.
+  // idsVistos crecía sin límite y la tabla no, así que la resta daba fuga
+  // donde sólo había olvido.
+  //
+  // El aviso en sí hizo su trabajo —dijo "no te fíes de mí" y tenía razón en
+  // no ser fiable—, pero señalaba a la tubería cuando el problema estaba en
+  // el instrumento. Ahora se distingue lo uno de lo otro.
+  const idsRetirados = new Set();
 
   // TODOS los ids que han entrado alguna vez. Sirve para detectar frases que
   // se evaporaron sin pasar por ningún contador: si un id entró y no está ni
@@ -116,7 +134,9 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       // El texto que de verdad SALIÓ POR EL ALTAVOZ. Distinto de
       // `traduccion` cuando el recorte lo cambió, y es el que hay que usar
       // para calcular el ritmo real de habla de esta frase.
-      traduccionHablada: null
+      traduccionHablada: null,
+      trozosAsr: null,
+      sospechosaAlucinacion: false
     });
   }
 
@@ -142,6 +162,15 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    * frase. Como anotarLote(), no lleva marca de tiempo y por eso no pasa por
    * marcar(): es un dato de configuración, no de instante.
    */
+  /** Diagnóstico de alucinación de esta frase (describe, no decide). */
+  function anotarAlucinacion(id, diagnostico) {
+    const f = vivas.get(id);
+    if (!f) return false;
+    f.trozosAsr = diagnostico?.total ?? null;
+    f.sospechosaAlucinacion = Boolean(diagnostico?.esSospechosa);
+    return true;
+  }
+
   function anotarRecorte(
     id,
     { activo = null, reduccion = null, sinRecortar = null, hablada = null } = {}
@@ -170,7 +199,12 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     vivas.delete(id);
     f.motivoFinal = motivoFinal;
     historial.push(f);
-    while (historial.length > MAX_FRASES) historial.shift();
+    // Al sacar una frase de la tabla por antigüedad hay que ANOTARLO. Si no,
+    // la verificación cruzada la ve desaparecida y la cuenta como fuga.
+    while (historial.length > MAX_FRASES) {
+      const retirada = historial.shift();
+      if (retirada && retirada.id !== undefined) idsRetirados.add(retirada.id);
+    }
     return f;
   }
 
@@ -198,6 +232,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
         // normal da 1-2; decenas delatan una alucinación repetitiva y
         // explican una traducción desbocada.
         'trozos MT': f.trozosMt,
+        '¿alucinación?': f.sospechosaAlucinacion ? 'SOSPECHOSA' : '',
         // El dato que vuelve interpretable cualquier tanda, incluso una en
         // la que se tocara el interruptor a mitad.
         recorte: f.recorteActivo === null ? '?' : f.recorteActivo ? 'on' : 'off',
@@ -499,7 +534,9 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     const enTabla = new Set(historial.map((f) => f.id));
     const contadas = new Set(perdidas.map((p) => p.id).filter((i) => i !== null));
 
-    const faltan = [...idsVistos].filter((id) => !enTabla.has(id) && !vivas.has(id)).sort((a, b) => a - b);
+    const faltan = [...idsVistos]
+      .filter((id) => !enTabla.has(id) && !vivas.has(id) && !idsRetirados.has(id))
+      .sort((a, b) => a - b);
     const sinExplicar = faltan.filter((id) => !contadas.has(id));
 
     // Huecos en la numeración: ids que ni siquiera llegaron a abrirse.
@@ -518,6 +555,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       'frases aún en curso': vivas.size,
       'huecos en la numeración': huecosNumeracion.length,
       'pérdidas registradas por el contador': perdidas.length,
+      'frases retiradas de la tabla por antigüedad': idsRetirados.size,
       'PORCENTAJE PERDIDO': totalFrases
         ? `${((totalPerdidas / totalFrases) * 100).toFixed(1)} %`
         : 'sin datos',
@@ -732,6 +770,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     vivas.clear();
     historial.length = 0;
     perdidas.length = 0;
+    idsRetirados.clear();
     idsVistos.clear();
     ultimoFinHabla = null;
     console.log(`${LOG} mediciones borradas.`);
@@ -749,6 +788,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     simularRecorte,
     anotarLote,
     anotarRecorte,
+    anotarAlucinacion,
     anotarPerdida,
     resumenPerdidas,
     verificacionCruzada,

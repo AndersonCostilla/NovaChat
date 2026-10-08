@@ -221,7 +221,9 @@ bloque('Robustez');
     crono.marcar(i, 'tInicioVoz');
     crono.cerrar(i);
   }
-  comprobar('el historial está acotado', crono.total() <= 40, `${crono.total()}`);
+  // El tope subió de 40 a 200 el 8-oct-2026: con 40, una tanda de cinco
+  // minutos perdía de vista su primera mitad.
+  comprobar('el historial está acotado', crono.total() <= 200, `${crono.total()}`);
   comprobar('y conserva las ÚLTIMAS, no las primeras', crono.filas().at(-1)['#'] === 100);
   comprobar('no quedan frases vivas colgadas', crono.vivas() === 0);
 
@@ -682,6 +684,65 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
     const r = c.simularRecorte(sinRecorte);
     // 100 caracteres x 110 ms = 11 s sobre 10 s de audio -> 1,10, NO 0,88.
     assert.equal(r['proporción ES/EN SIN recorte (mediana)'], 1.1);
+  });
+}
+
+
+/* ------------------------------------------------------------------ */
+/* REGRESIÓN: el tope del historial contaba como fuga (8-oct-2026)     */
+/* ------------------------------------------------------------------ */
+//
+// En una tanda de 61 frases SIN NINGUNA PÉRDIDA REAL, verificacionCruzada()
+// decía "21 frases desaparecieron sin que ningún contador las recogiera".
+// Las 21 eran 61 - 40: las que el tope del historial tiraba por viejas.
+{
+  const sinPerder = (n) => {
+    const c = crearCronometro();
+    for (let i = 1; i <= n; i++) {
+      c.abrir(i, { tInicioHabla: 0, segundosAudio: 5, motivoCierre: 'silencio' });
+      c.cerrar(i, { motivoFinal: 'doblada' });
+    }
+    return c;
+  };
+
+  comprobar('61 frases sin perder ninguna: el contador CUADRA', () => {
+    const v = sinPerder(61).verificacionCruzada();
+    assert.match(v['¿cuadra el contador?'], /^SÍ/);
+    assert.equal(v['ids sin explicar'].length, 0);
+  });
+
+  comprobar('una tanda larga tampoco inventa fugas', () => {
+    const v = sinPerder(250).verificacionCruzada();
+    assert.match(v['¿cuadra el contador?'], /^SÍ/);
+    assert.ok(v['frases retiradas de la tabla por antigüedad'] > 0);
+  });
+
+  comprobar('pero una fuga DE VERDAD se sigue viendo', () => {
+    const c = crearCronometro();
+    for (let i = 1; i <= 250; i++) {
+      c.abrir(i, { tInicioHabla: 0, segundosAudio: 5, motivoCierre: 'silencio' });
+      c.cerrar(i, { motivoFinal: 'doblada' });
+    }
+    // Un salto en la numeración: las frases 251-299 nunca llegaron a abrirse.
+    c.abrir(300, { tInicioHabla: 0, segundosAudio: 5, motivoCierre: 'silencio' });
+    c.cerrar(300, { motivoFinal: 'doblada' });
+    const v = c.verificacionCruzada();
+    assert.match(v['¿cuadra el contador?'], /^NO/);
+    assert.equal(v['ids sin explicar'].length, 49);
+  });
+
+  comprobar('la tabla guarda una tanda de 5 minutos entera', () => {
+    // Con el tope anterior (40) una tanda de 60-70 frases perdía de vista la
+    // primera mitad y las medianas sólo describían el final.
+    assert.equal(sinPerder(70).filas().length, 70);
+  });
+
+  comprobar('el diagnóstico de alucinación llega a la tabla', () => {
+    const c = crearCronometro();
+    c.abrir(57, { tInicioHabla: 0, segundosAudio: 12.03, motivoCierre: 'tope' });
+    c.anotarAlucinacion(57, { total: 111, esSospechosa: true });
+    c.cerrar(57, { motivoFinal: 'doblada' });
+    assert.equal(c.filas()[0]['¿alucinación?'], 'SOSPECHOSA');
   });
 }
 
