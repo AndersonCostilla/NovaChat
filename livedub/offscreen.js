@@ -610,15 +610,26 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
   // RECORTE (opción A). Se aplica después de traducir y antes de hablar.
   // El subtítulo enseña el MISMO texto que se pronuncia: si la voz dice una
   // cosa y el subtítulo otra, el espectador no sabe a cuál creer.
-  let recorte = null;
+  //
+  // EL ESTADO DEL INTERRUPTOR SE ANOTA SIEMPRE, encendido o apagado, y antes
+  // de hacer nada con él. Ya hubo dos tandas que se perdieron porque no
+  // constaba si el recorte estaba activo: la medición no puede depender de
+  // que alguien recuerde qué comando escribió y en qué orden.
+  cronometro.anotarRecorte(id, { activo: recorteActivo, reduccion: null });
+
   if (recorteActivo && traduccion) {
-    recorte = recortar(traduccion, { objetivo: recorteObjetivo });
+    const recorte = recortar(traduccion, { objetivo: recorteObjetivo });
     if (recorte.texto && recorte.texto !== traduccion) {
-      cronometro.marcar(id, 'tRecorte', {
-        traduccionSinRecortar: traduccion,
-        reduccionRecorte: recorte.reduccion
+      cronometro.anotarRecorte(id, {
+        activo: true,
+        reduccion: recorte.reduccion,
+        sinRecortar: traduccion
       });
       traduccion = recorte.texto;
+    } else {
+      // Encendido pero sin nada que recortar en esta frase: 0 %, no "no se
+      // aplicó". Son cosas distintas y la tabla tiene que distinguirlas.
+      cronometro.anotarRecorte(id, { activo: true, reduccion: 0 });
     }
   }
 
@@ -1175,6 +1186,33 @@ globalThis.livedub = {
         'quito esa regla; el recorte sigue APAGADO hasta que digas que sí.'
     );
     return { tabla, resumen: lote };
+  },
+
+  /**
+   * ¿CUÁNTO APORTA EL RECORTE? Compara las frases marcadas "on" contra las
+   * marcadas "off" de esta misma sesión. Uso: livedub.comparar()
+   */
+  comparar: () => {
+    const r = cronometro.compararRecorte();
+    console.log('\n── ¿Cuánto aporta el recorte? ──');
+    console.table({
+      'con recorte (on)': r['con recorte (on)'],
+      'sin recorte (off)': r['sin recorte (off)']
+    });
+    if (r['frases sin marcar (medidas antes de existir la columna)']) {
+      console.warn(
+        `[LiveDub] ${r['frases sin marcar (medidas antes de existir la columna)']} frases ` +
+          'no llevan marca de recorte. Son de antes de que existiera la columna y ' +
+          'quedan fuera de la comparación.'
+      );
+    }
+    console.log(`VEREDICTO: ${r.veredicto}`);
+    console.log(
+      'La cifra que manda es la PROPORCIÓN ES/EN. Por encima de 1, cada frase deja ' +
+        'menos hueco a la siguiente y la pérdida es inevitable, calcule el equipo lo ' +
+        'rápido que calcule.'
+    );
+    return r;
   },
 
   // El límite teórico: qué pasaría si Whisper y la traducción fueran

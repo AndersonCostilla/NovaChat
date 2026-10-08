@@ -101,7 +101,18 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       texto: null,
       traduccion: null,
       trozosMt: null,
-      maxTokensMt: null
+      maxTokensMt: null,
+      // ESTADO DEL RECORTE EN EL MOMENTO DE PROCESAR ESTA FRASE.
+      //
+      // Se guarda por frase, no por sesión, porque ya hubo DOS tandas en las
+      // que no quedó claro si el recorte estaba activo y las dos quedaron
+      // inservibles. Depender de que alguien recuerde qué comando escribió y
+      // en qué orden no es un método de medición.
+      //
+      // null = la frase se procesó antes de que existiera esta columna.
+      recorteActivo: null,
+      reduccionRecorte: null,
+      traduccionSinRecortar: null
     });
   }
 
@@ -119,6 +130,20 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     if (!f) return false;
     f.trozosMt = trozos;
     f.maxTokensMt = maxTokens;
+    return true;
+  }
+
+  /**
+   * Deja constancia de si el recorte estaba encendido cuando se procesó esta
+   * frase. Como anotarLote(), no lleva marca de tiempo y por eso no pasa por
+   * marcar(): es un dato de configuración, no de instante.
+   */
+  function anotarRecorte(id, { activo = null, reduccion = null, sinRecortar = null } = {}) {
+    const f = vivas.get(id);
+    if (!f) return false;
+    if (activo !== null) f.recorteActivo = Boolean(activo);
+    if (reduccion !== null) f.reduccionRecorte = reduccion;
+    if (sinRecortar !== null) f.traduccionSinRecortar = sinRecortar;
     return true;
   }
 
@@ -165,6 +190,10 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
         // normal da 1-2; decenas delatan una alucinación repetitiva y
         // explican una traducción desbocada.
         'trozos MT': f.trozosMt,
+        // El dato que vuelve interpretable cualquier tanda, incluso una en
+        // la que se tocara el interruptor a mitad.
+        recorte: f.recorteActivo === null ? '?' : f.recorteActivo ? 'on' : 'off',
+        '−% recorte': f.reduccionRecorte === null ? null : `${(f.reduccionRecorte * 100).toFixed(1)} %`,
         'espera hasta hablar (ms)': ms(f.tFinMt, f.tInicioVoz),
         'DESFASE desde FIN (s)': segundos(ms(f.tFinHabla, f.tInicioVoz)),
         'DESFASE desde INICIO (s)': segundos(ms(f.tInicioHabla, f.tInicioVoz)),
@@ -174,6 +203,11 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
         'doblaje hablado (s)': segundos(ms(f.tInicioVoz, f.tFinVoz)),
         'hueco disponible (s)': segundos(f.intervaloMs ?? null),
         'ocupación (%)': ocupacionDe(f),
+        // LA PROPORCIÓN ES/EN. Cuánto dura el doblaje en español comparado
+        // con lo que duró el original en inglés. Es el número que decide si
+        // el sistema puede dar abasto: por encima de 1, cada frase deja menos
+        // hueco a la siguiente, y da igual lo rápido que calcule el equipo.
+        'proporción ES/EN': proporcionDe(f),
         'resultado': f.motivoFinal || 'doblada'
       };
     });
@@ -184,6 +218,11 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    * anterior. Por encima de 100 el sistema NO da abasto: cada frase empuja
    * a la siguiente y el retraso crece hasta que hay que descartar.
    */
+  function proporcionDe(f) {
+    if (f.tInicioVoz === null || f.tFinVoz === null || !f.segundosAudio) return null;
+    return Number(((f.tFinVoz - f.tInicioVoz) / 1000 / f.segundosAudio).toFixed(3));
+  }
+
   function ocupacionDe(f) {
     if (f.tInicioVoz === null || f.tFinVoz === null || !f.intervaloMs) return null;
     return Math.round(((f.tFinVoz - f.tInicioVoz) / f.intervaloMs) * 100);
@@ -483,6 +522,66 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     };
   }
 
+  /**
+   * COMPARACIÓN on/off DEL RECORTE, hecha por el programa.
+   *
+   * Parte el historial en dos según el estado real del interruptor cuando se
+   * procesó cada frase y compara lo único que importa: la proporción ES/EN y
+   * la ocupación. Así una tanda en la que se tocara el interruptor a mitad
+   * deja de ser basura — se lee por grupos — y una tanda homogénea lo dice.
+   *
+   * No hace falta recordar nada ni fiarse de nadie: el dato va en la frase.
+   */
+  function compararRecorte() {
+    const conVoz = historial.filter((f) => f.tInicioVoz !== null && f.tFinVoz !== null);
+
+    const grupo = (activo) => {
+      const filas = conVoz.filter((f) => f.recorteActivo === activo);
+      const props = filas.map(proporcionDe).filter((v) => v !== null);
+      const ocup = filas.map(ocupacionDe).filter((v) => v !== null);
+      const reducciones = filas.map((f) => f.reduccionRecorte).filter((v) => typeof v === 'number');
+      return {
+        frases: filas.length,
+        'proporción ES/EN (mediana)': props.length ? Number(mediana(props).toFixed(3)) : null,
+        'ocupación % (mediana)': ocup.length ? Math.round(mediana(ocup)) : null,
+        'frases por encima del 100 %': ocup.filter((v) => v > 100).length,
+        'recorte medio aplicado': reducciones.length
+          ? `${(mediana(reducciones) * 100).toFixed(1)} %`
+          : 'no aplica'
+      };
+    };
+
+    const on = grupo(true);
+    const off = grupo(false);
+    const sinMarcar = conVoz.filter((f) => f.recorteActivo === null).length;
+
+    // El veredicto se escribe aquí y no en el chat, para que no dependa de
+    // quién lo cuente.
+    let veredicto;
+    if (on.frases < 5 || off.frases < 5) {
+      veredicto =
+        'NO SE PUEDE COMPARAR TODAVÍA: hacen falta al menos 5 frases con voz en ' +
+        `cada grupo (hay ${on.frases} con recorte y ${off.frases} sin él).`;
+    } else if (on['proporción ES/EN (mediana)'] < 1 && off['proporción ES/EN (mediana)'] >= 1) {
+      veredicto = 'EL RECORTE BASTA: con él la proporción baja de 1 y sin él no.';
+    } else if (on['proporción ES/EN (mediana)'] >= 1) {
+      veredicto =
+        'EL RECORTE NO BASTA: aun con él, la proporción sigue en o por encima de 1, ' +
+        'así que cada frase sigue dejando menos hueco a la siguiente y la pérdida ' +
+        'estructural no desaparece. Hay que decidir entre aceptar pérdida residual ' +
+        'o reconsiderar el búfer.';
+    } else {
+      veredicto = 'La proporción ya estaba por debajo de 1 sin recorte: este vídeo no es el caso difícil.';
+    }
+
+    return {
+      'con recorte (on)': on,
+      'sin recorte (off)': off,
+      'frases sin marcar (medidas antes de existir la columna)': sinMarcar,
+      veredicto
+    };
+  }
+
   function resumenPerdidas() {
     const porEtapa = {};
     let segundosTotales = 0;
@@ -519,7 +618,9 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     // Las traducciones REALES de esta sesión, para poder enseñar ejemplos
     // de recorte sobre frases de verdad en vez de sobre frases inventadas.
     textosTraducidos: () => historial.map((f) => f.traduccion).filter((t) => typeof t === 'string' && t.trim()),
+    compararRecorte,
     anotarLote,
+    anotarRecorte,
     anotarPerdida,
     resumenPerdidas,
     verificacionCruzada,

@@ -8,6 +8,30 @@ fila era de cuál**. Esa tabla no se puede interpretar y no voy a intentarlo.
 
 ---
 
+## Lo que ha cambiado: ya no depende de tu memoria
+
+**La tabla registra ahora, frase por frase, si el recorte estaba encendido.**
+Columna nueva `recorte`, con `on`, `off` o `?` (las frases medidas antes de
+que existiera la columna). Se lee del interruptor real en el momento de
+procesar cada frase, no de lo que nadie recuerde haber escrito.
+
+Y hay un comando que hace la comparación solo:
+
+```js
+livedub.comparar()
+```
+
+Parte las frases en dos grupos según esa columna y compara lo único que
+importa: la **proporción ES/EN** y la **ocupación**. Escribe él el veredicto.
+Si en un grupo hay menos de 5 frases, dice `NO SE PUEDE COMPARAR` en vez de
+inventarse una conclusión.
+
+**Consecuencia práctica:** si esta vez se te vuelve a colar el interruptor a
+mitad, **la tanda ya no se pierde**. Se lee por grupos. Los pasos de abajo
+siguen siendo la forma limpia de hacerlo, pero ya no son la única red.
+
+---
+
 ## La regla de oro
 
 > **Una vez empieza la prueba, NO se toca `livedub.recorte()`.**
@@ -92,8 +116,14 @@ descarte ya mueve el porcentaje varios puntos.
 ```js
 livedub.latenciaTexto()
 livedub.perdidas()
+livedub.comparar()
 livedub.recorteEjemplos()
 ```
+
+Y una comprobación de un vistazo: en la tabla de `latenciaTexto()`, **la
+columna `recorte` tiene que decir `on` en todas las filas**. Si ves alguna
+`off` o `?` mezclada, no pasa nada — `livedub.comparar()` las separa — pero
+dímelo para que lo tenga en cuenta.
 
 Y págame las tres salidas enteras, tal cual.
 
@@ -108,6 +138,8 @@ Y págame las tres salidas enteras, tal cual.
 | **ocupación (%)** | `latenciaTexto()` | Es la cifra que de verdad decide. Tiene que bajar de 100 |
 | **trozos MT** | `latenciaTexto()` | Confirmar que los atascos siguen sin volver |
 | **reducción media** | `recorteEjemplos()` | Cuánto recortó **de verdad** con tus frases, no con las mías |
+| **proporción ES/EN** | `comparar()` | **La cifra que decide.** Por encima de 1, la pérdida es inevitable |
+| **veredicto** | `comparar()` | Lo escribe el programa, para que no dependa de quién lo cuente |
 
 **La cifra que manda es la ocupación, no el porcentaje de pérdida.** La pérdida
 es el síntoma y depende de la racha que te toque; la ocupación es la causa y es
@@ -126,6 +158,39 @@ eso sé exactamente qué regla quitar.
 
 Perfectamente válido. `livedub.recorte(false)` y me lo dices. Lo que no sirve
 es una tanda a medias presentada como completa.
+
+---
+
+## El diagnóstico que hay que confirmar, dicho por adelantado
+
+Lo escribo **antes** de la prueba para no poder acomodarlo después.
+
+La reducción real que hemos medido hasta ahora es del **3,5 %**. Para que la
+ocupación baje de 100 con una proporción de 1,11 hace falta recortar:
+
+```
+1 − (1 ÷ 1,11) = 9,9 %
+```
+
+Con 3,5 %, la proporción se queda en `1,11 × 0,965 = 1,071`. **Sigue por
+encima de 1.** Si eso se confirma con la columna nueva, la conclusión es ésta
+y no otra:
+
+> **El recorte, por sí solo, no basta.** Reduce la pérdida, pero no la
+> elimina, porque no llega ni a la mitad de lo que haría falta. Y no se puede
+> forzar subiendo el objetivo: ya se intentó y lo que salió fueron las frases
+> rotas que tú mismo capturaste.
+
+Entonces vuelven a la mesa las dos únicas salidas reales, y la decisión es
+tuya:
+
+| | Qué implica |
+|---|---|
+| **Aceptar pérdida residual** | Sigues con el camino 1. En rachas de habla muy continua se pierde alguna frase, siempre avisada y contada. Es lo que ya está escrito en `ALCANCE-DOBLAJE.md`. |
+| **Reconsiderar el búfer** | Una espera al principio (por ejemplo 20-30 s) absorbe las rachas y la pérdida se va casi a cero. A cambio pierdes el arranque instantáneo que elegiste expresamente. |
+
+**No voy a implementar ninguna de las dos sin que lo digas.** Y si los números
+me desmienten —si la proporción con recorte baja de 1— lo diré igual de claro.
 
 ---
 

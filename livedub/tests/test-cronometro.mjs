@@ -8,12 +8,30 @@
 //
 // Uso: node livedub/tests/test-cronometro.mjs
 
+import assert from 'node:assert/strict';
 import { crearCronometro, MOTIVO_CIERRE } from '../cronometro.js';
 
 let pasadas = 0;
 let fallidas = 0;
 
+// Acepta DOS formas: un booleano (estilo original de este archivo) o una
+// función con asserts dentro.
+//
+// LO SEGUNDO NO FUNCIONABA Y DABA VERDE. El 8-oct-2026 se añadieron siete
+// comprobaciones escritas como funciones; `if (condicion)` con una función
+// es SIEMPRE cierto, así que las siete pasaron sin ejecutarse ni una línea.
+// Es el mismo tipo de fallo que el `node --check` verde sobre un módulo
+// roto: una prueba que no puede fallar no es una prueba.
 function comprobar(titulo, condicion, detalle = '') {
+  if (typeof condicion === 'function') {
+    try {
+      condicion();
+      condicion = true;
+    } catch (error) {
+      condicion = false;
+      detalle = detalle || error.message;
+    }
+  }
   if (condicion) {
     console.log(`  ✔ ${titulo}`);
     pasadas++;
@@ -487,6 +505,102 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
   );
   comprobar('sin desfase inventado', fila['DESFASE desde FIN (s)'] === null);
 }
+
+
+/* ------------------------------------------------------------------ */
+/* Columna de recorte y comparación on/off (8-oct-2026)                */
+/* ------------------------------------------------------------------ */
+//
+// Existe porque DOS tandas seguidas quedaron inservibles al no constar si el
+// recorte estaba activo. El dato va ahora en cada frase.
+
+{
+  const reloj = { t: 0 };
+  const c = crearCronometro({ ahora: () => reloj.t });
+
+  // 6 frases sin recorte y 6 con recorte, con doblajes de distinta duración.
+  const meter = (id, recorteOn, segundosAudio, duracionVozMs) => {
+    c.abrir(id, { tInicioHabla: reloj.t, segundosAudio, motivoCierre: 'tope' });
+    c.anotarRecorte(id, { activo: recorteOn, reduccion: recorteOn ? 0.1 : null });
+    c.marcar(id, 'tFinAsr');
+    c.marcar(id, 'tFinMt');
+    c.marcar(id, 'tInicioVoz');
+    reloj.t += duracionVozMs;
+    c.marcar(id, 'tFinVoz');
+    c.cerrar(id, { motivoFinal: 'doblada' });
+    reloj.t += 1000;
+  };
+
+  for (let i = 1; i <= 6; i++) meter(i, false, 10, 11100); // 1,11x
+  for (let i = 7; i <= 12; i++) meter(i, true, 10, 9800); // 0,98x
+
+  const filas = c.filas();
+  comprobar('la tabla dice si el recorte estaba on u off en cada frase', () => {
+    assert.equal(filas[0].recorte, 'off');
+    assert.equal(filas[11].recorte, 'on');
+  });
+
+  comprobar('la tabla trae la proporción ES/EN por frase', () => {
+    assert.equal(filas[0]['proporción ES/EN'], 1.11);
+    assert.equal(filas[11]['proporción ES/EN'], 0.98);
+  });
+
+  const cmp = c.compararRecorte();
+  comprobar('compararRecorte separa los dos grupos solo', () => {
+    assert.equal(cmp['con recorte (on)'].frases, 6);
+    assert.equal(cmp['sin recorte (off)'].frases, 6);
+    assert.equal(cmp['con recorte (on)']['proporción ES/EN (mediana)'], 0.98);
+    assert.equal(cmp['sin recorte (off)']['proporción ES/EN (mediana)'], 1.11);
+  });
+
+  comprobar('el veredicto lo escribe el programa, no el que lo cuenta', () => {
+    assert.match(cmp.veredicto, /^EL RECORTE BASTA/);
+  });
+
+  comprobar('si el recorte no baja de 1, el veredicto lo dice sin adornos', () => {
+    const r2 = { t: 0 };
+    const d = crearCronometro({ ahora: () => r2.t });
+    for (let i = 1; i <= 12; i++) {
+      const on = i > 6;
+      d.abrir(i, { tInicioHabla: r2.t, segundosAudio: 10, motivoCierre: 'tope' });
+      d.anotarRecorte(i, { activo: on, reduccion: on ? 0.035 : null });
+      d.marcar(i, 'tInicioVoz');
+      r2.t += on ? 10710 : 11100; // 1,11 x (1 - 0,035) = 1,071
+      d.marcar(i, 'tFinVoz');
+      d.cerrar(i, { motivoFinal: 'doblada' });
+      r2.t += 1000;
+    }
+    const v = d.compararRecorte();
+    assert.equal(v['con recorte (on)']['proporción ES/EN (mediana)'], 1.071);
+    assert.match(v.veredicto, /^EL RECORTE NO BASTA/);
+    assert.match(v.veredicto, /búfer/);
+  });
+
+  comprobar('con pocas frases NO se pronuncia: dice que no se puede comparar', () => {
+    const r3 = { t: 0 };
+    const e = crearCronometro({ ahora: () => r3.t });
+    e.abrir(1, { tInicioHabla: 0, segundosAudio: 10, motivoCierre: 'tope' });
+    e.anotarRecorte(1, { activo: true });
+    e.marcar(1, 'tInicioVoz');
+    r3.t += 9000;
+    e.marcar(1, 'tFinVoz');
+    e.cerrar(1, { motivoFinal: 'doblada' });
+    assert.match(e.compararRecorte().veredicto, /^NO SE PUEDE COMPARAR/);
+  });
+
+  comprobar('las frases viejas sin marca quedan fuera, no se inventan', () => {
+    const r4 = { t: 0 };
+    const g = crearCronometro({ ahora: () => r4.t });
+    g.abrir(1, { tInicioHabla: 0, segundosAudio: 10, motivoCierre: 'tope' });
+    g.marcar(1, 'tInicioVoz');
+    r4.t += 9000;
+    g.marcar(1, 'tFinVoz');
+    g.cerrar(1, { motivoFinal: 'doblada' });
+    assert.equal(g.filas()[0].recorte, '?');
+    assert.equal(g.compararRecorte()['frases sin marcar (medidas antes de existir la columna)'], 1);
+  });
+}
+
 
 console.log(`\n==========================================================`);
 console.log(`Resultado: ${pasadas} pasadas, ${fallidas} fallidas`);
