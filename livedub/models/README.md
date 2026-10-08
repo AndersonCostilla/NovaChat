@@ -101,3 +101,18 @@ Nada grave y a propósito, con degradación **independiente por módulo**:
 - **Sin el traductor**: la transcripción sigue apareciendo con normalidad; cada
   subtítulo lleva el aviso «Traducción no disponible…» y la insignia muestra
   «Traductor no disponible».
+
+
+## Comprobar que los pesos están completos
+
+```powershell
+powershell -ExecutionPolicy Bypass -File livedub\models\verificar-modelos.ps1
+```
+
+Revisa **los dos** modelos (`whisper-tiny` y `opus-mt-en-es`) archivo por
+archivo y avisa de los que falten o estén truncados. Es utilidad de desarrollo:
+no forma parte de lo que carga Chrome.
+
+> Recuerda que los pesos **no están en Git** (ver `.gitignore`): cada quien los
+> descarga en su máquina con los scripts de esta carpeta. Si clonas el
+> repositorio en otro sitio, `models/` llegará vacía y es lo esperado.

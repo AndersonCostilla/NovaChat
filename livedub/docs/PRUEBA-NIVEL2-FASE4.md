@@ -167,7 +167,15 @@ debe decir «corrupto o incompleto».
 *(Las líneas rojas de `404` / `ERR_FILE_NOT_FOUND` son ruido esperado del
 navegador, no cuentan como excepción sin capturar.)*
 
-**Restaura los tres archivos antes de seguir.**
+**Restaura los tres archivos antes de seguir.** Y compruébalo, no te fíes:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File livedub\models\verificar-modelos.ps1
+```
+
+Tiene que decir `TODO CORRECTO`. Si te saltas este paso, el traductor seguirá
+fallando en los bloques 5, 6 y 7 y parecerá un bug nuevo cuando en realidad es
+el archivo que moviste tú.
 
 ## 5. Persistencia del par completo (original + traducción)
 
