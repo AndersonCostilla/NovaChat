@@ -127,6 +127,13 @@ livedub/
   traductor.js         Orquestación de la traducción (cola y estado)
   traductor-worker.js  Worker dedicado: pipeline OPUS-MT en→es (WASM)
   detector-idioma.js   Heurística para no traducir lo que no es inglés
+  voz-sistema.js       MOTOR DE VOZ POR DEFECTO: la voz española de Windows
+  motor-voz.js         Fachada: elige el motor y coordina el ducking
+  ducking.js           Baja y sube el audio original (lo usan los dos motores)
+  sintetizador.js      Orquestación del motor de RESERVA (cola y estado)
+  sintetizador-worker.js  Worker dedicado: MMS-TTS por ONNX (reserva)
+  reproductor-doblaje.js  Reproduce las muestras de MMS-TTS (sólo la reserva)
+  rendimiento-voz.js   Banco de medición del motor de reserva
   libs/transformers/   @xenova/transformers 2.17.2 vendorizado + ort-wasm-simd
   models/whisper-tiny/   Pesos de Whisper (NO están en Git)
   models/opus-mt-en-es/  Pesos del traductor (NO están en Git)
@@ -200,23 +207,53 @@ antes y parecía una avería.
 
 Los subtítulos no dependen de nada de esto y siguen funcionando igual.
 
-### Dos motores de voz, conmutables
+### Dos motores de voz
 
-El script de descarga baja **los dos** archivos del modelo:
+**Por defecto habla la voz española instalada en Windows**, a través de
+`speechSynthesis` desde el documento offscreen. MMS-TTS queda como reserva.
 
-| Archivo | Tamaño | Medido | Cuándo |
-|---|---|---|---|
-| `onnx/model_quantized.onnx` | ~38 MB | **~3.550 ms/s** | **Por defecto.** int8 |
-| `onnx/model.onnx` | ~114 MB | 4.057 ms/s | Opcional, sólo para comparar |
+| | Voz del sistema (por defecto) | MMS-TTS (reserva) |
+|---|---|---|
+| Dónde se genera | Windows, fuera de Chrome | en un worker, con ONNX |
+| Coste de CPU | prácticamente nulo | ~2.000 ms por segundo de voz (i5-12400) |
+| Descarga | ninguna | 38 MB |
+| Requisito | tener una voz española instalada | ninguno |
+| Archivo | `voz-sistema.js` | `sintetizador.js` + `sintetizador-worker.js` |
 
-Se alterna con **una sola línea**, `VOZ.USAR_CUANTIZADO` en
-[`messages.js`](messages.js), sin volver a descargar nada.
+La elección es **automática**: si no hay ninguna voz española local
+instalada, se cae a MMS-TTS y se dice por consola por qué. Para forzar uno:
 
-Se probó float32 porque en VITS la cuantización int8 *puede* salir lenta
-(ONNX Runtime inserta conversiones en las capas que no soporta en int8).
-**Se midió y la hipótesis resultó falsa**: float32 fue un 14 % peor y pesa el
-triple. El interruptor se conserva por si la relación se invierte en otro
-equipo, pero la descarga del grande es opcional.
+```js
+livedub.setMotorVoz('mms')      // o 'sistema'
+```
+
+…y apagar y encender el interruptor de doblaje para que tome efecto.
+
+#### Por qué no se usan las voces «Google español»
+
+Chrome ofrece también voces de red (`localService: false`). Usarlas
+**enviaría el texto traducido a servidores de Google**, justo lo que este
+proyecto promete no hacer. `voz-sistema.js` filtra por `localService === true`
+siempre, y si sólo quedan voces de red se declara no disponible en vez de
+caer en una. Para ver qué voces hay y cuáles se descartan:
+
+```js
+livedub.voces()
+```
+
+#### Por qué NO se pide el permiso `"tts"`
+
+Se comprobó en Chrome real (8-oct-2026) que `speechSynthesis` funciona dentro
+del documento offscreen: ve las voces del sistema, habla sin que haya habido
+ningún clic y dispara los eventos `start` y `end`. Al funcionar ahí, no hace
+falta `chrome.tts`, ni el permiso, ni pasar por el service worker. El
+`manifest.json` no cambió.
+
+#### Qué le pasó a `reproductor-doblaje.js`
+
+El ducking se mudó a `ducking.js`, porque lo necesitan los dos motores. El
+reproductor conserva sólo lo que es exclusivo de MMS-TTS: convertir las
+muestras en sonido. La voz del sistema no pasa por él.
 
 ### Diagnóstico
 

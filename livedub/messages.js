@@ -183,6 +183,65 @@ export const VOZ = {
   PRESUPUESTO_MS: 15000
 };
 
+// ─────────────────────────────────────────────────────────────────────
+// MOTOR DE VOZ
+// ─────────────────────────────────────────────────────────────────────
+// Hay dos, y el de arriba (VOZ) describe sólo al de reserva.
+export const MOTOR_VOZ = {
+  // Voz española instalada en Windows, vía speechSynthesis desde el
+  // documento offscreen. POR DEFECTO. Coste de CPU ~0.
+  SISTEMA: 'sistema',
+  // MMS-TTS por ONNX en un worker. RESERVA: sólo si el equipo no tiene
+  // ninguna voz española local instalada. Es mucho más lento (~2.000 ms de
+  // cálculo por segundo de voz en un i5-12400), pero no depende del sistema.
+  MMS: 'mms'
+};
+
+// Ajustes del motor del sistema. Las cifras salen de la medición del
+// 7-oct-2026 en el i5-12400 de referencia y de la sonda del paso 0.5.
+export const VOZ_SISTEMA = {
+  // Prefijo de idioma que se busca en voice.lang ("es" cubre es-ES, es-MX…).
+  IDIOMA: 'es',
+
+  // Nombre exacto de una voz concreta, o null para coger la primera local.
+  // En el equipo de referencia hay dos: "Microsoft Raul - Spanish (Mexico)"
+  // y "Microsoft Sabina - Spanish (Mexico)".
+  NOMBRE_PREFERIDO: null,
+
+  // AVISO MEDIDO, NO SUPUESTO: en la sonda del 7-oct-2026 este parámetro NO
+  // funcionó con las voces SAPI de Windows. A 1.2 la locución duró
+  // exactamente lo mismo que a 1.0 (10,95 s frente a 10,97 s). Se deja en 1
+  // para no fingir un control que no tenemos. Si algún día se mide que sí
+  // responde, aquí es donde se sube.
+  VELOCIDAD: 1,
+
+  // Velocidad real de habla medida: 189 caracteres en 10,97 s = 17,2 car/s.
+  // Se usa para estimar cuánto debería durar una locución y así detectar que
+  // el evento `end` no ha llegado.
+  CARACTERES_POR_SEGUNDO: 17.2,
+
+  // Chrome puede cortar las locuciones largas. Se trocea por oraciones para
+  // no exponerse: trocear no cambia ni una palabra de lo que se dice.
+  MAX_CARACTERES_LOCUCION: 180,
+
+  // Frases esperando turno. Igual que en el sintetizador: por encima de esto
+  // la voz iría tan por detrás que ya no acompañaría a la escena.
+  MAX_EN_COLA: 2,
+
+  // Vigilante por si `end` no llega nunca. Plazo = duración estimada ×
+  // FACTOR + MARGEN, nunca menos que el mínimo.
+  VIGILANTE_FACTOR: 2.5,
+  VIGILANTE_MARGEN_MS: 4000,
+  VIGILANTE_MINIMO_MS: 8000,
+
+  // getVoices() devuelve [] hasta que el motor del sistema responde.
+  INTENTOS_VOCES: 30,
+  ESPERA_VOCES_MS: 100,
+
+  // Mediciones que se guardan para la mediana de diagnóstico.
+  VENTANA_MEDICIONES: 12
+};
+
 // Resuelve qué archivo .onnx toca según el interruptor de arriba.
 export function archivoOnnxVoz(usarCuantizado = VOZ.USAR_CUANTIZADO) {
   return usarCuantizado ? VOZ.ARCHIVO_CUANTIZADO : VOZ.ARCHIVO_COMPLETO;

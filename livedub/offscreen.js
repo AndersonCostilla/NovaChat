@@ -21,15 +21,11 @@
 // El analyser cuelga de la FUENTE, no de gainOriginal: así el medidor seguirá
 // mostrando el nivel real aunque el ducking baje gainOriginal.
 
-import { MSG, TARGET, ESTADO_MODELO_UI, MODULO } from './messages.js';
+import { MSG, TARGET, ESTADO_MODELO_UI, MODULO, MOTOR_VOZ } from './messages.js';
 import { crearTranscriptor } from './transcriptor.js';
 import { crearTraductor } from './traductor.js';
-import { crearSintetizador } from './sintetizador.js';
-import {
-  crearReproductorDoblaje,
-  fijarVelocidadDoblaje,
-  obtenerVelocidadDoblaje
-} from './reproductor-doblaje.js';
+import { crearMotorVoz } from './motor-voz.js';
+import { fijarVelocidadDoblaje, obtenerVelocidadDoblaje } from './reproductor-doblaje.js';
 import { detectarIdioma, NOMBRE_IDIOMA } from './detector-idioma.js';
 
 const INTERVALO_NIVEL_MS = 100; // cada cuánto enviamos el nivel al popup
@@ -70,8 +66,12 @@ let sumideroMudo = null;
 // Transcripción (Fase 3) y traducción (Fase 4).
 let transcriptor = null;
 let traductor = null;
-let sintetizador = null;
-let reproductor = null;
+// Fachada del doblaje: decide si habla la voz del sistema o MMS-TTS y se
+// encarga del ducking. Ver motor-voz.js.
+let motorVoz = null;
+// null = elección automática (voz del sistema, y reserva si no hay ninguna
+// instalada). Se puede forzar desde la consola con livedub.setMotorVoz().
+let motorVozPedido = null;
 // Fase 5: el doblaje por voz se activa desde el popup. Por defecto apagado:
 // añade latencia y carga de CPU, y el usuario debe poder usar sólo subtítulos.
 let doblajeActivo = false;
@@ -343,58 +343,55 @@ function montarTraductor() {
   montarDoblaje();
 }
 
-// Fase 5: voz en español + ducking. Tercer worker independiente.
+// Fase 5: voz en español + ducking.
+//
+// El motor por defecto es la voz instalada en Windows (speechSynthesis desde
+// este mismo documento offscreen). Comprobado en Chrome real el 8-oct-2026:
+// habla, ve las voces locales y avisa cuando termina. MMS-TTS queda como
+// reserva automática para equipos sin voz española instalada.
 function montarDoblaje() {
-  reproductor = crearReproductorDoblaje({
-    // Se consulta en cada reproducción porque la cadena de audio se crea y se
-    // destruye con cada Iniciar / Detener.
+  motorVoz = crearMotorVoz({
+    // Se consulta en cada uso porque la cadena de audio se crea y se destruye
+    // con cada Iniciar / Detener.
     obtenerCadena: () =>
       contextOriginal && gainOriginal ? { contexto: contextOriginal, ganancia: gainOriginal } : null,
-    onHablando: (hablando) => {
-      if (!hablando) return;
-      publicarEstadoModelo(
-        { estado: ESTADO_MODELO_UI.HABLANDO, detalle: 'Reproduciendo el doblaje…' },
-        MODULO.SINTESIS
-      );
-    }
-  });
-  reproductor.silenciar(!doblajeActivo);
 
-  sintetizador = crearSintetizador({
     onEstado: (info) => publicarEstadoModelo(info, MODULO.SINTESIS),
-    onActividad: (ocupado) => {
-      // OJO: "ya no estoy ocupado" NO debe pisar un veredicto de equipo
-      // insuficiente ni un error. Si no, la insignia volvería a decir "Voz
-      // lista" justo después de avisar de que el doblaje se apagó.
-      const actual = sintetizador?.obtenerEstado();
-      if (actual === 'insuficiente' || actual === 'error') return;
+
+    onHablando: (hablando) => {
       publicarEstadoModelo(
-        {
-          estado: ocupado ? ESTADO_MODELO_UI.SINTETIZANDO : ESTADO_MODELO_UI.LISTO,
-          detalle: ocupado ? 'Generando la voz…' : 'Voz lista'
-        },
+        hablando
+          ? { estado: ESTADO_MODELO_UI.HABLANDO, detalle: 'Reproduciendo el doblaje…' }
+          : { estado: ESTADO_MODELO_UI.LISTO, detalle: 'Voz lista' },
         MODULO.SINTESIS
       );
     },
-    onRendimiento: (info) =>
-      console.log(
-        `[LiveDub] Rendimiento de la voz: ${info.msPorSegundoAudio} ms por segundo de audio ` +
-          `(${info.veredicto}). Detalle con livedub.rendimiento()`
-      ),
-    onError: (error) => console.warn('[LiveDub] Error sintetizando una frase:', error)
+
+    onError: (error) => console.warn('[LiveDub] Problema con la voz:', error),
+
+    rutas: {
+      rutaModelos: chrome.runtime.getURL('models/'),
+      rutaWasm: chrome.runtime.getURL('libs/transformers/'),
+      modelo: 'mms-tts-spa'
+    },
+
+    motorPedido: motorVozPedido
   });
 
-  // El modelo de voz sólo se carga si el doblaje está activado: son 38 o 114 MB
-  // (según VOZ.USAR_CUANTIZADO) y CPU que no tiene sentido gastar si el usuario
-  // sólo quiere subtítulos. Por eso el interruptor viene apagado de fábrica.
-  if (doblajeActivo) arrancarSintetizador();
+  motorVoz.silenciar(!doblajeActivo);
+
+  // Carga perezosa: con la voz del sistema arrancar es instantáneo y gratis,
+  // pero con la reserva son 38 MB de modelo. Sólo si el doblaje está activo.
+  if (doblajeActivo) arrancarMotorVoz();
 }
 
-function arrancarSintetizador() {
-  sintetizador?.iniciar({
-    rutaModelos: chrome.runtime.getURL('models/'),
-    rutaWasm: chrome.runtime.getURL('libs/transformers/'),
-    modelo: 'mms-tts-spa'
+function arrancarMotorVoz() {
+  motorVoz?.iniciar().catch((error) => {
+    console.error('[LiveDub] No se pudo iniciar el motor de voz:', error);
+    publicarEstadoModelo(
+      { estado: ESTADO_MODELO_UI.ERROR, detalle: 'No se pudo iniciar la voz.' },
+      MODULO.SINTESIS
+    );
   });
 }
 
@@ -405,11 +402,11 @@ function aplicarDoblaje(activo) {
   doblajeActivo = nuevo;
   console.log(`[LiveDub] Doblaje por voz ${doblajeActivo ? 'ACTIVADO' : 'desactivado'}.`);
 
-  reproductor?.silenciar(!doblajeActivo);
+  motorVoz?.silenciar(!doblajeActivo);
 
   if (doblajeActivo) {
     // Carga perezosa: la primera vez que se enciende.
-    if (sintetizador && sintetizador.obtenerEstado() === 'inactivo') arrancarSintetizador();
+    if (motorVoz && motorVoz.motorActivo() === null) arrancarMotorVoz();
   } else {
     publicarEstadoModelo(
       { estado: ESTADO_MODELO_UI.INACTIVO, detalle: 'Doblaje desactivado' },
@@ -540,18 +537,15 @@ async function traducirYPublicar({ texto, idiomaDetectado, duracionMs }) {
   });
 }
 
-// Genera la voz y la reproduce agachando el audio original.
+// Pide la voz al motor activo. El ducking lo hace el propio motor.
 async function doblar(textoEspanol, segundosOrigen = null) {
-  const resultado = await (sintetizador?.sintetizar(textoEspanol, { segundosOrigen }) ??
-    Promise.resolve({ audio: null, motivo: 'voz no iniciada' }));
+  const resultado = await (motorVoz?.doblar(textoEspanol, { segundosOrigen }) ??
+    Promise.resolve({ hablado: false, motivo: 'voz no iniciada' }));
 
-  if (!resultado.audio) {
-    // Nunca en silencio: si no hay voz, se dice por qué.
+  // Nunca en silencio: si no hay voz, se dice por qué.
+  if (!resultado.hablado) {
     console.warn(`[LiveDub] Sin doblaje para esta frase (${resultado.motivo || 'motivo desconocido'}).`);
-    return;
   }
-
-  reproductor?.reproducir(resultado.audio, resultado.hz);
 }
 
 // Subtítulo -> service worker -> historial en storage.session + popup.
@@ -649,10 +643,9 @@ async function detener() {
 
   // Fase 5: cortar el doblaje ANTES de desmontar la cadena de audio, para no
   // dejar el volumen original agachado.
-  reproductor?.parar();
-  sintetizador?.destruir();
-  sintetizador = null;
-  reproductor = null;
+  motorVoz?.parar();
+  motorVoz?.destruir();
+  motorVoz = null;
 
   // --- Cadena original (lo que se oye) ---
   try {
@@ -740,33 +733,100 @@ globalThis.livedub = {
     vad: { isSpeaking, bloquesAcumulados: speechChunks.length, silenceCounter },
     modelo: transcriptor?.obtenerEstado() ?? 'inactivo',
     traductor: traductor?.obtenerEstado() ?? 'inactivo',
-    sintetizador: sintetizador?.obtenerEstado() ?? 'inactivo',
+    sintetizador: motorVoz?.obtenerEstado() ?? 'inactivo',
+    motorVoz: motorVoz?.motorActivo() ?? 'ninguno',
     doblajeActivo,
-    doblandoAhora: reproductor?.estaHablando() ?? false,
+    doblandoAhora: motorVoz?.estaHablando() ?? false,
     frasesDescartadas,
     idiomaOrigen
   }),
   // Diagnóstico del doblaje: dice en una línea legible si el interruptor
   // llegó, si el worker existe y en qué estado está. Uso: livedub.doblaje()
   doblaje: () => {
+    if (!motorVoz) {
+      console.log('[LiveDub] No hay motor de voz: inicia la captura.');
+      return null;
+    }
     const info = {
       'interruptor recibido por el offscreen': doblajeActivo ? 'SÍ (activado)' : 'no (desactivado)',
-      'objeto sintetizador creado': sintetizador ? 'sí' : 'NO — ¿se inició la captura?',
-      'estado del modelo de voz': sintetizador?.obtenerEstado() ?? 'inactivo',
-      'reproductor creado': reproductor ? 'sí' : 'no',
-      'hablando ahora': reproductor?.estaHablando() ? 'sí' : 'no',
-      'frases de voz en cola': reproductor?.enCola() ?? 0
+      ...motorVoz.informe()
     };
     console.table(info);
     return info;
   },
 
+  // Qué voces del sistema ve la extensión y cuáles descarta por ser de red.
+  // Uso: livedub.voces()
+  voces: () => {
+    const vs = motorVoz?.vozSistema();
+    if (!vs) {
+      console.log(
+        '[LiveDub] El motor de la voz del sistema no está activo ' +
+          '(o se cayó a la reserva MMS-TTS). Inicia la captura y activa el doblaje.'
+      );
+      return [];
+    }
+    const lista = vs.inventario().map((v) => ({
+      nombre: v.nombre,
+      idioma: v.idioma,
+      '¿se puede usar?': v.local ? 'SÍ (local)' : 'no — es de red, enviaría el texto fuera'
+    }));
+    console.table(lista);
+    return lista;
+  },
+
+  // Fuerza un motor concreto para comparar. Uso:
+  //   livedub.setMotorVoz('mms')      → motor de reserva
+  //   livedub.setMotorVoz('sistema')  → voz de Windows
+  // Hay que apagar y encender el doblaje (o Detener/Iniciar) para que aplique.
+  setMotorVoz: (cual) => {
+    const valido = [MOTOR_VOZ.SISTEMA, MOTOR_VOZ.MMS];
+    if (!valido.includes(cual)) {
+      console.warn(`[LiveDub] Motor no reconocido. Usa uno de: ${valido.join(', ')}`);
+      return motorVozPedido;
+    }
+    motorVozPedido = cual;
+    console.log(
+      `[LiveDub] Motor de voz pedido: ${cual}. ` +
+        'Apaga y enciende el interruptor de doblaje para que tome efecto.'
+    );
+    return motorVozPedido;
+  },
+  motorVoz: () => motorVoz?.motorActivo() ?? 'ninguno',
+
   // Fase 5.1. Informe de rendimiento de la voz: la tabla que antes había que
   // reconstruir a mano a partir de decenas de líneas de log. Uso:
   //   livedub.rendimiento()
   rendimiento: () => {
+    if (!motorVoz) {
+      console.log('[LiveDub] No hay motor de voz: inicia la captura y activa el doblaje.');
+      return null;
+    }
+
+    // Con la voz del sistema no hay "coste de síntesis" que medir: la genera
+    // Windows fuera de nuestro proceso. Lo que sí interesa es a qué ritmo
+    // habla y cuánto esperan las frases en la cola.
+    const vs = motorVoz.vozSistema();
+    if (vs) {
+      const r = vs.rendimiento();
+      if (!r.muestras) {
+        console.log('[LiveDub] Todavía no se ha doblado ninguna frase.');
+        return r;
+      }
+      console.table({
+        'motor en uso': 'voz del sistema (speechSynthesis)',
+        'voz': r.voz,
+        'frases medidas': r.muestras,
+        'caracteres por segundo': r.caracteresPorSegundo,
+        'espera en cola (mediana)': `${r.esperaEnColaMs} ms`,
+        'coste de CPU de la síntesis': 'ninguno: lo hace Windows'
+      });
+      return r;
+    }
+
+    const sintetizador = motorVoz.sintetizador();
     if (!sintetizador) {
-      console.log('[LiveDub] No hay sintetizador: inicia la captura y activa el doblaje.');
+      console.log('[LiveDub] El motor de reserva no está activo.');
       return null;
     }
     const info = sintetizador.rendimiento();
@@ -787,7 +847,7 @@ globalThis.livedub = {
 
   // Detalle frase a frase, por si hace falta pegar los números crudos.
   rendimientoDetalle: () => {
-    const filas = sintetizador?.detalleRendimiento() ?? [];
+    const filas = motorVoz?.sintetizador()?.detalleRendimiento() ?? [];
     console.table(filas);
     return filas;
   },
@@ -801,7 +861,7 @@ globalThis.livedub = {
   velocidadVoz: () => obtenerVelocidadDoblaje(),
 
   // Borra las mediciones y reactiva el doblaje si se había apagado solo.
-  reintentarVoz: () => sintetizador?.reintentar() ?? null,
+  reintentarVoz: () => motorVoz?.sintetizador()?.reintentar() ?? null,
 
   // Permite afinar el VAD en caliente, sin recargar la extensión.
   vadInfo: () => ({ VAD_THRESHOLD, MAX_SILENCE_CHUNKS, MAX_FRASE_CHUNKS }),

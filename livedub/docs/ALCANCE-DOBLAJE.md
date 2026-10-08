@@ -71,6 +71,41 @@ El vídeo se reproduce con total normalidad y la voz lo sigue por detrás.
 
 ---
 
+## ¿Cambia la cifra ahora que la voz es rápida? NO
+
+Pregunta expresa del propietario el 8-oct-2026, al adoptarse la voz del
+sistema: *«con esta voz más rápida, ¿sigue aplicando el desfase de 15-18
+segundos?»*
+
+**Sigue aplicando. La cifra no se mueve.** Y conviene entender por qué,
+porque es contraintuitivo.
+
+La voz nueva es unas **10.000 veces más barata** de generar que MMS-TTS:
+pasó de ~2.000 ms de cálculo por segundo de voz a prácticamente cero, porque
+la sintetiza Windows fuera de nuestro proceso. Pero mira dónde estaba el
+tiempo:
+
+| Etapa | Antes (MMS-TTS) | Ahora (voz del sistema) |
+|---|---|---|
+| Esperar a que termine la frase (VAD) | hasta 12 s | **hasta 12 s — igual** |
+| Transcribir (Whisper) | 2 – 3 s | **2 – 3 s — igual** |
+| Traducir (OPUS-MT) | 1 – 2 s | **1 – 2 s — igual** |
+| Sintetizar | 25 – 45 s **y creciendo** | ~0 s |
+| **Resultado** | **se iba a infinito** | **15 – 18 s estables** |
+
+Lo que arregla la voz rápida **no es el retraso, es que el retraso dejara de
+crecer**. Antes cada frase tardaba en generarse más de lo que duraba, así que
+cada una empujaba a la siguiente y la distancia aumentaba sin techo hasta que
+no quedaba más remedio que descartar frases enteras. Ahora la voz termina
+mucho antes de que llegue la siguiente, y la distancia se queda quieta.
+
+> **En una frase: antes el problema era que el desfase crecía; ahora es que
+> el desfase existe. Lo segundo no tiene arreglo con un motor más rápido,
+> porque no se puede traducir una frase antes de haberla oído entera.**
+
+Para reducir los 15-18 s habría que recortar los 12 s del VAD, y eso se
+rechazó expresamente para no partir las frases y estropear la traducción.
+
 ## Qué sí se garantiza
 
 1. **Continuidad.** Mientras haya alguien hablando, hay voz española. Sin

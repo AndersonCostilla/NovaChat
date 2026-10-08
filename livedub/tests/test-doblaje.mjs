@@ -149,6 +149,7 @@ const { crearReproductorDoblaje, fijarVelocidadDoblaje, obtenerVelocidadDoblaje 
   '../reproductor-doblaje.js'
 );
 const { DUCKING, VOZ } = await import('../messages.js');
+const { crearDucking } = await import('../ducking.js');
 
 // AudioContext simulado, suficiente para observar las rampas de ganancia.
 const rampas = [];
@@ -205,9 +206,22 @@ function crearCadenaFalsa() {
 
 const cadena = crearCadenaFalsa();
 const hablando = [];
+
+// OJO AL CAMBIO: el ducking ya NO vive dentro del reproductor, se mudó a
+// ducking.js porque lo necesitan los dos motores de voz (la voz del sistema
+// no reproduce muestras, pero sí tiene que agachar el original).
+//
+// Aquí se montan igual que los monta motor-voz.js en producción, así que
+// estas pruebas siguen cubriendo exactamente lo que se ejecuta: el
+// reproductor avisa de cuándo habla y el ducking reacciona.
+const ducking = crearDucking({ obtenerCadena: () => cadena });
 const repro = crearReproductorDoblaje({
   obtenerCadena: () => cadena,
-  onHablando: (h) => hablando.push(h)
+  onHablando: (h) => {
+    hablando.push(h);
+    if (h) ducking.agachar();
+    else ducking.levantar();
+  }
 });
 
 comprobar('el volumen original parte de 1', cadena.ganancia.gain.value === 1);
@@ -293,6 +307,7 @@ repro.parar();
 console.log('\n7) Sin captura activa no se rompe');
 
 const sinCadena = crearReproductorDoblaje({ obtenerCadena: () => null });
+void sinCadena;
 let reventó = false;
 try {
   sinCadena.reproducir(onda, 16000);

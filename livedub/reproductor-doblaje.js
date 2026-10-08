@@ -1,17 +1,25 @@
 // reproductor-doblaje.js
-// Reproduce la voz doblada y hace el DUCKING del audio original (Fase 5).
+// Reproduce por el AudioContext las muestras que genera MMS-TTS.
 //
-// QUÉ ES EL DUCKING
-// Mientras suena la voz en español, el audio original del vídeo baja a un ~18 %
-// y vuelve a subir cuando el doblaje termina. Se oyen los dos sin pisarse.
+// OJO — ESTE ARCHIVO YA NO SE USA EN EL CAMINO NORMAL
+// Desde que el motor por defecto es la voz del sistema (ver voz-sistema.js),
+// esto sólo entra en juego con el MOTOR DE RESERVA. La voz de Windows habla
+// sola por los altavoces y no nos entrega muestras que reproducir, así que no
+// pasa por aquí en absoluto.
 //
-// Las rampas usan setTargetAtTime, igual que livedub.setGain(), para que el
-// cambio de volumen se sienta suave y no como un corte.
+// Se conserva porque MMS-TTS es el único recurso para quien no tenga una voz
+// española instalada en su sistema, y sin este módulo ese motor no suena.
+//
+// QUÉ SE LE QUITÓ
+// El ducking se mudó a ducking.js, porque lo necesitan LOS DOS motores y
+// sólo uno de ellos necesita reproducir muestras. Aquí ya no se toca ningún
+// GainNode: se avisa de cuándo se empieza y se termina de hablar, y de
+// agachar el audio original se encarga quien corresponda.
 //
 // Este módulo NO sintetiza nada: recibe una onda ya generada. Y no toca
 // chrome.* en absoluto: vive dentro del documento offscreen.
 
-import { DUCKING, VOZ } from './messages.js';
+import { VOZ } from './messages.js';
 
 const LOG = '[LiveDub][doblaje]';
 
@@ -33,33 +41,22 @@ export function obtenerVelocidadDoblaje() {
 
 /**
  * @param {object} opciones
- * @param {() => ({contexto: AudioContext, ganancia: GainNode})|null} opciones.obtenerCadena
- *   Devuelve el AudioContext y el GainNode del audio ORIGINAL, o null si no hay
- *   captura. Se pasa como función porque la cadena se crea y se destruye con
- *   cada Iniciar/Detener.
+ * @param {{agachar: Function, levantar: Function, obtenerCadena?: Function}} opciones.ducking
+ *   Módulo de ducking compartido (ducking.js). Sólo se usa para localizar el
+ *   AudioContext por el que reproducir; agachar y levantar lo decide la capa
+ *   de arriba, que es la que sabe si hay otra frase encadenada detrás.
+ * @param {() => ({contexto: AudioContext, ganancia: GainNode}|null)} [opciones.obtenerCadena]
  * @param {(hablando: boolean) => void} [opciones.onHablando]
  */
-export function crearReproductorDoblaje({ obtenerCadena, onHablando } = {}) {
+export function crearReproductorDoblaje({ ducking, obtenerCadena, onHablando } = {}) {
+  // La cadena de audio se puede recibir directa o a través del ducking.
+  const cadenaDe = obtenerCadena || ducking?.obtenerCadena || (() => null);
   // Cola de reproducción: las frases se oyen de una en una y en orden. Sin
   // esto, dos doblajes solapados serían ininteligibles.
   const cola = [];
   let reproduciendo = false;
   let fuenteActual = null;
   let silenciado = false;
-
-  // Volumen del original ANTES de agachar, para poder restaurarlo tal cual.
-  let gananciaPrevia = null;
-
-  function agachar(ganancia, contexto) {
-    if (gananciaPrevia === null) gananciaPrevia = ganancia.gain.value;
-    ganancia.gain.setTargetAtTime(DUCKING.NIVEL, contexto.currentTime, DUCKING.RAMPA_S / 3);
-  }
-
-  function levantar(ganancia, contexto) {
-    const destino = gananciaPrevia === null ? 1 : gananciaPrevia;
-    ganancia.gain.setTargetAtTime(destino, contexto.currentTime, DUCKING.RAMPA_S / 3);
-    gananciaPrevia = null;
-  }
 
   /**
    * Encola una onda para reproducirla.
@@ -89,13 +86,15 @@ export function crearReproductorDoblaje({ obtenerCadena, onHablando } = {}) {
     const tarea = cola.shift();
     if (!tarea) return;
 
-    const cadena = obtenerCadena?.();
-    if (!cadena?.contexto || !cadena?.ganancia) {
+    const cadena = cadenaDe();
+    if (!cadena?.contexto) {
       console.warn(`${LOG} no hay captura activa: no se reproduce el doblaje.`);
+      // El hueco se libera igualmente: si no, la cola se quedaría bloqueada.
+      onHablando?.(false);
       return;
     }
 
-    const { contexto, ganancia } = cadena;
+    const { contexto } = cadena;
 
     let buffer;
     try {
@@ -120,14 +119,13 @@ export function crearReproductorDoblaje({ obtenerCadena, onHablando } = {}) {
 
     reproduciendo = true;
     fuenteActual = fuente;
-    agachar(ganancia, contexto);
     onHablando?.(true);
 
     const segundos = tarea.audio.length / tarea.hz;
     const oidos = (segundos / velocidad).toFixed(2);
     console.log(
       `${LOG} reproduciendo ${segundos.toFixed(2)} s de doblaje en ${oidos} s ` +
-        `(velocidad x${velocidad}, original al ${DUCKING.NIVEL * 100} %)`
+        `(velocidad x${velocidad}, motor de reserva MMS-TTS)`
     );
 
     fuente.onended = () => {
@@ -142,7 +140,6 @@ export function crearReproductorDoblaje({ obtenerCadena, onHablando } = {}) {
         return;
       }
 
-      levantar(ganancia, contexto);
       onHablando?.(false);
     };
 
@@ -165,10 +162,6 @@ export function crearReproductorDoblaje({ obtenerCadena, onHablando } = {}) {
     }
 
     reproduciendo = false;
-
-    const cadena = obtenerCadena?.();
-    if (cadena?.contexto && cadena?.ganancia) levantar(cadena.ganancia, cadena.contexto);
-    else gananciaPrevia = null;
 
     onHablando?.(false);
   }
