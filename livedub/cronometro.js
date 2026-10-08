@@ -112,7 +112,11 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       // null = la frase se procesó antes de que existiera esta columna.
       recorteActivo: null,
       reduccionRecorte: null,
-      traduccionSinRecortar: null
+      traduccionSinRecortar: null,
+      // El texto que de verdad SALIÓ POR EL ALTAVOZ. Distinto de
+      // `traduccion` cuando el recorte lo cambió, y es el que hay que usar
+      // para calcular el ritmo real de habla de esta frase.
+      traduccionHablada: null
     });
   }
 
@@ -138,12 +142,16 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    * frase. Como anotarLote(), no lleva marca de tiempo y por eso no pasa por
    * marcar(): es un dato de configuración, no de instante.
    */
-  function anotarRecorte(id, { activo = null, reduccion = null, sinRecortar = null } = {}) {
+  function anotarRecorte(
+    id,
+    { activo = null, reduccion = null, sinRecortar = null, hablada = null } = {}
+  ) {
     const f = vivas.get(id);
     if (!f) return false;
     if (activo !== null) f.recorteActivo = Boolean(activo);
     if (reduccion !== null) f.reduccionRecorte = reduccion;
     if (sinRecortar !== null) f.traduccionSinRecortar = sinRecortar;
+    if (hablada !== null) f.traduccionHablada = hablada;
     return true;
   }
 
@@ -545,9 +553,26 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
         'proporción ES/EN (mediana)': props.length ? Number(mediana(props).toFixed(3)) : null,
         'ocupación % (mediana)': ocup.length ? Math.round(mediana(ocup)) : null,
         'frases por encima del 100 %': ocup.filter((v) => v > 100).length,
-        'recorte medio aplicado': reducciones.length
+
+        // LAS DOS CIFRAS DEL RECORTE, ETIQUETADAS.
+        //
+        // Antes había una sola, llamada "recorte medio aplicado", y era una
+        // MEDIANA. Daba 0,0 % mientras recorteEjemplos() decía 1,8 %, y
+        // parecían contradecirse. No se contradicen: miden cosas distintas y
+        // ahora lo dicen en el nombre.
+        //
+        // Y la diferencia entre las dos es el dato más interesante de la
+        // tabla: si la MEDIANA es 0 % y la MEDIA no, es que a MÁS DE LA
+        // MITAD de las frases el recorte no les quita ni un carácter, y lo
+        // poco que ahorra sale de unas pocas frases con rodeos. Eso explica
+        // por sí solo por qué el recorte no llega al 9,9 % que haría falta.
+        'recorte: MEDIANA por frase': reducciones.length
           ? `${(mediana(reducciones) * 100).toFixed(1)} %`
-          : 'no aplica'
+          : 'no aplica',
+        'recorte: MEDIA por frase': reducciones.length
+          ? `${((reducciones.reduce((n, v) => n + v, 0) / reducciones.length) * 100).toFixed(1)} %`
+          : 'no aplica',
+        'frases a las que NO les quitó nada': reducciones.filter((v) => v === 0).length
       };
     };
 
@@ -578,6 +603,108 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       'con recorte (on)': on,
       'sin recorte (off)': off,
       'frases sin marcar (medidas antes de existir la columna)': sinMarcar,
+      veredicto
+    };
+  }
+
+  /**
+   * ¿QUÉ HABRÍA PASADO CON Y SIN RECORTE, SOBRE ESTAS MISMAS FRASES?
+   *
+   * El problema de comparar dos tandas es que no son el mismo contenido: un
+   * tramo de vídeo con frases densas y otro con frases sueltas dan
+   * proporciones distintas sin que el recorte tenga nada que ver. Esto lo
+   * evita por completo: coge las frases REALES ya medidas y calcula cuánto
+   * habría durado cada una con el texto recortado y sin él.
+   *
+   * No hay confusión posible con el contenido, porque el contenido es
+   * exactamente el mismo en las dos columnas.
+   *
+   * CÓMO SE ESTIMA LA DURACIÓN. No con una constante global, sino con la
+   * velocidad REAL de cada frase: milisegundos que tardó en decirse dividido
+   * entre sus caracteres. Después se multiplica por los caracteres de la
+   * variante. Así cada frase se mide con su propio ritmo.
+   *
+   * LIMITACIÓN, DICHA AQUÍ Y NO EN LETRA PEQUEÑA: esto supone que el tiempo
+   * de habla es proporcional al número de caracteres DENTRO de una misma
+   * frase. Es buena aproximación con un motor de voz a ritmo fijo, pero las
+   * pausas de puntuación no escalan igual. Da la MAGNITUD del efecto; la
+   * confirmación con audio real sigue haciendo falta.
+   *
+   * @param {(texto: string) => {texto: string}} recortarFn
+   */
+  function simularRecorte(recortarFn) {
+    const usables = historial.filter(
+      (f) =>
+        f.tInicioVoz !== null &&
+        f.tFinVoz !== null &&
+        f.segundosAudio &&
+        typeof (f.traduccionSinRecortar ?? f.traduccion) === 'string' &&
+        (f.traduccionSinRecortar ?? f.traduccion).trim() &&
+        typeof (f.traduccionHablada ?? f.traduccion) === 'string' &&
+        (f.traduccionHablada ?? f.traduccion).length > 0
+    );
+
+    if (usables.length < 5) {
+      return {
+        frases: usables.length,
+        veredicto:
+          `NO HAY BASTANTES FRASES (${usables.length}). Hacen falta al menos 5 con voz ` +
+          'medida y texto guardado. Deja correr el vídeo unos minutos más.'
+      };
+    }
+
+    const sin = [];
+    const con = [];
+    const ahorros = [];
+    let caracteresSin = 0;
+    let caracteresCon = 0;
+
+    for (const f of usables) {
+      const original = f.traduccionSinRecortar ?? f.traduccion;
+      const recortado = recortarFn(original)?.texto ?? original;
+
+      // Ritmo real de ESTA frase, a partir de lo que de verdad se pronunció.
+      const hablada = f.traduccionHablada ?? f.traduccion;
+      const msPorCaracter = (f.tFinVoz - f.tInicioVoz) / hablada.length;
+      const msSin = original.length * msPorCaracter;
+      const msCon = recortado.length * msPorCaracter;
+
+      caracteresSin += original.length;
+      caracteresCon += recortado.length;
+      ahorros.push(original.length === 0 ? 0 : (original.length - recortado.length) / original.length);
+
+      sin.push(msSin / 1000 / f.segundosAudio);
+      con.push(msCon / 1000 / f.segundosAudio);
+    }
+
+    const propSin = Number(mediana(sin).toFixed(3));
+    const propCon = Number(mediana(con).toFixed(3));
+    const reduccionAgregada = caracteresSin ? (caracteresSin - caracteresCon) / caracteresSin : 0;
+    const necesaria = propSin > 1 ? 1 - 1 / propSin : 0;
+
+    let veredicto;
+    if (propSin <= 1) {
+      veredicto =
+        `Este tramo NO es el caso difícil: sin recorte la proporción ya era ${propSin}, ` +
+        'por debajo de 1. No sirve para saber si el recorte basta.';
+    } else if (propCon < 1) {
+      veredicto =
+        `EL RECORTE BASTA EN ESTE CONTENIDO: baja la proporción de ${propSin} a ${propCon}.`;
+    } else {
+      veredicto =
+        `EL RECORTE NO BASTA: baja la proporción de ${propSin} a ${propCon}, y sigue ` +
+        `en o por encima de 1. Habría hecho falta recortar un ${(necesaria * 100).toFixed(1)} % ` +
+        `y recorta un ${(reduccionAgregada * 100).toFixed(1)} %.`;
+    }
+
+    return {
+      frases: usables.length,
+      'proporción ES/EN SIN recorte (mediana)': propSin,
+      'proporción ES/EN CON recorte (mediana)': propCon,
+      'recorte AGREGADO (caracteres totales)': `${(reduccionAgregada * 100).toFixed(1)} %`,
+      'recorte MEDIANA por frase': `${(mediana(ahorros) * 100).toFixed(1)} %`,
+      'recorte necesario para bajar de 1': `${(necesaria * 100).toFixed(1)} %`,
+      'frases a las que no les quita nada': ahorros.filter((v) => v === 0).length,
       veredicto
     };
   }
@@ -619,6 +746,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     // de recorte sobre frases de verdad en vez de sobre frases inventadas.
     textosTraducidos: () => historial.map((f) => f.traduccion).filter((t) => typeof t === 'string' && t.trim()),
     compararRecorte,
+    simularRecorte,
     anotarLote,
     anotarRecorte,
     anotarPerdida,

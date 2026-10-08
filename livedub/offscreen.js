@@ -623,7 +623,8 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
       cronometro.anotarRecorte(id, {
         activo: true,
         reduccion: recorte.reduccion,
-        sinRecortar: traduccion
+        sinRecortar: traduccion,
+        hablada: recorte.texto
       });
       traduccion = recorte.texto;
     } else {
@@ -1211,6 +1212,27 @@ globalThis.livedub = {
       'La cifra que manda es la PROPORCIÓN ES/EN. Por encima de 1, cada frase deja ' +
         'menos hueco a la siguiente y la pérdida es inevitable, calcule el equipo lo ' +
         'rápido que calcule.'
+    );
+    return r;
+  },
+
+  /**
+   * LA COMPARACIÓN LIMPIA: qué habría pasado CON y SIN recorte sobre las
+   * MISMAS frases de esta sesión. Uso: livedub.simularRecorte()
+   *
+   * Es la única forma de comparar sin que el contenido del vídeo contamine
+   * el resultado, porque las dos columnas salen de las mismas frases.
+   */
+  simularRecorte: () => {
+    const r = cronometro.simularRecorte((t) => recortar(t, { objetivo: recorteObjetivo }));
+    console.log('\n── CON recorte vs SIN recorte, sobre las MISMAS frases ──');
+    console.table(r);
+    console.log(`VEREDICTO: ${r.veredicto}`);
+    console.log(
+      'Limitación: la duración de cada variante se estima con el ritmo real de ESA ' +
+        'frase (ms por carácter), suponiendo que el habla es proporcional a los ' +
+        'caracteres. Da la MAGNITUD del efecto; la confirmación con audio real sigue ' +
+        'haciendo falta.'
     );
     return r;
   },

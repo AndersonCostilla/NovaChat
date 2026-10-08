@@ -411,7 +411,13 @@ export function recortarLote(textos, opciones = {}) {
     filas,
     caracteresAntes: antes,
     caracteresDespues: despues,
-    reduccionMedia: antes ? Number(((antes - despues) / antes).toFixed(4)) : 0,
+    // AGREGADA, no promedio de porcentajes: caracteres ahorrados sobre
+    // caracteres totales. Es la que corresponde comparar con el 9,9 % que
+    // haría falta, porque lo que importa es el tiempo total de habla, no el
+    // porcentaje medio por frase. Etiquetada así para que no se confunda con
+    // la mediana por frase que da livedub.comparar().
+    reduccionAgregada: antes ? Number(((antes - despues) / antes).toFixed(4)) : 0,
+    reduccionMedia: antes ? Number(((antes - despues) / antes).toFixed(4)) : 0, // alias histórico
     segundosAhorrados: Number(((antes - despues) / CARACTERES_POR_SEGUNDO).toFixed(2)),
     frasesQueCumplenElObjetivo: filas.filter((f) => f.objetivoCumplido).length,
     frasesSinTocar: filas.filter((f) => f.reduccion === 0).length

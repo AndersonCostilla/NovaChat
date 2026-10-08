@@ -602,6 +602,89 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
 }
 
 
+/* ------------------------------------------------------------------ */
+/* simularRecorte: comparación sin que el contenido contamine          */
+/* ------------------------------------------------------------------ */
+{
+  // Recortador falso y determinista: quita el 20 % de los caracteres.
+  const recorte20 = (t) => ({ texto: t.slice(0, Math.ceil(t.length * 0.8)) });
+  const sinRecorte = (t) => ({ texto: t });
+
+  const montar = (recortarFn) => {
+    const reloj = { t: 0 };
+    const c = crearCronometro({ ahora: () => reloj.t });
+    for (let i = 1; i <= 8; i++) {
+      const texto = 'x'.repeat(100);
+      c.abrir(i, { tInicioHabla: reloj.t, segundosAudio: 10, motivoCierre: 'tope' });
+      c.anotarRecorte(i, { activo: false });
+      c.marcar(i, 'tFinMt', { traduccion: texto });
+      c.marcar(i, 'tInicioVoz');
+      reloj.t += 11000; // 100 caracteres en 11 s -> 1,10x
+      c.marcar(i, 'tFinVoz');
+      c.cerrar(i, { motivoFinal: 'doblada' });
+      reloj.t += 1000;
+    }
+    return c.simularRecorte(recortarFn);
+  };
+
+  comprobar('sin recorte, las dos columnas son idénticas', () => {
+    const r = montar(sinRecorte);
+    assert.equal(r['proporción ES/EN SIN recorte (mediana)'], 1.1);
+    assert.equal(r['proporción ES/EN CON recorte (mediana)'], 1.1);
+    assert.equal(r['recorte AGREGADO (caracteres totales)'], '0.0 %');
+  });
+
+  comprobar('un recorte del 20 % baja la proporción de 1,10 a 0,88', () => {
+    const r = montar(recorte20);
+    assert.equal(r['proporción ES/EN SIN recorte (mediana)'], 1.1);
+    assert.equal(r['proporción ES/EN CON recorte (mediana)'], 0.88);
+    assert.match(r.veredicto, /^EL RECORTE BASTA/);
+  });
+
+  comprobar('dice cuánto recorte HARÍA FALTA, no solo cuánto hay', () => {
+    const r = montar(sinRecorte);
+    // 1 - 1/1,10 = 9,1 %
+    assert.equal(r['recorte necesario para bajar de 1'], '9.1 %');
+    assert.match(r.veredicto, /^EL RECORTE NO BASTA/);
+  });
+
+  comprobar('con menos de 5 frases no se pronuncia', () => {
+    const reloj = { t: 0 };
+    const c = crearCronometro({ ahora: () => reloj.t });
+    c.abrir(1, { tInicioHabla: 0, segundosAudio: 10, motivoCierre: 'tope' });
+    c.marcar(1, 'tFinMt', { traduccion: 'hola' });
+    c.marcar(1, 'tInicioVoz');
+    reloj.t += 1000;
+    c.marcar(1, 'tFinVoz');
+    c.cerrar(1, { motivoFinal: 'doblada' });
+    assert.match(c.simularRecorte(sinRecorte).veredicto, /^NO HAY BASTANTES FRASES/);
+  });
+
+  comprobar('usa el texto REALMENTE hablado para el ritmo, no el previo', () => {
+    const reloj = { t: 0 };
+    const c = crearCronometro({ ahora: () => reloj.t });
+    for (let i = 1; i <= 6; i++) {
+      c.abrir(i, { tInicioHabla: reloj.t, segundosAudio: 10, motivoCierre: 'tope' });
+      c.marcar(i, 'tFinMt', { traduccion: 'y'.repeat(100) });
+      // El recorte dejó 80 caracteres, y ésos son los que se pronunciaron.
+      c.anotarRecorte(i, {
+        activo: true,
+        reduccion: 0.2,
+        sinRecortar: 'y'.repeat(100),
+        hablada: 'y'.repeat(80)
+      });
+      c.marcar(i, 'tInicioVoz');
+      reloj.t += 8800; // 80 caracteres en 8,8 s = 110 ms/carácter
+      c.marcar(i, 'tFinVoz');
+      c.cerrar(i, { motivoFinal: 'doblada' });
+      reloj.t += 1000;
+    }
+    const r = c.simularRecorte(sinRecorte);
+    // 100 caracteres x 110 ms = 11 s sobre 10 s de audio -> 1,10, NO 0,88.
+    assert.equal(r['proporción ES/EN SIN recorte (mediana)'], 1.1);
+  });
+}
+
 console.log(`\n==========================================================`);
 console.log(`Resultado: ${pasadas} pasadas, ${fallidas} fallidas`);
 console.log(`==========================================================`);
