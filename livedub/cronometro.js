@@ -52,6 +52,12 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
   // retraso: esto es audio del vídeo que nadie va a oír doblado.
   const perdidas = [];
 
+  // TODOS los ids que han entrado alguna vez. Sirve para detectar frases que
+  // se evaporaron sin pasar por ningún contador: si un id entró y no está ni
+  // en la tabla ni viva ni contado como pérdida, hay una fuga que no
+  // conocemos. Es la red de seguridad sobre la propia instrumentación.
+  const idsVistos = new Set();
+
   /**
    * Una frase acaba de cerrarse en el VAD y sale hacia Whisper.
    * @param {number} id            el que devuelve transcriptor.transcribir()
@@ -72,6 +78,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     //
     // El orden de LLEGADA sí es siempre monótono, así que el hueco medido
     // aquí no puede salir negativo pase lo que pase aguas abajo.
+    idsVistos.add(id);
     const tFinHabla = ahora();
     const intervaloMs = ultimoFinHabla === null ? null : tFinHabla - ultimoFinHabla;
     ultimoFinHabla = tFinHabla;
@@ -398,6 +405,50 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     if (id !== null && vivas.has(id)) cerrar(id, { motivoFinal: `PERDIDA en ${etapa}: ${detalle}` });
   }
 
+  /**
+   * VERIFICACIÓN CRUZADA. ¿Cuadra el contador de pérdidas con los huecos
+   * que hay en la numeración de las frases?
+   *
+   * La numeración la asigna el transcriptor y es consecutiva. Si falta un
+   * número en la tabla, esa frase existió y desapareció. Si el contador de
+   * pérdidas no la recoge, es que hay una fuga por una vía que todavía no
+   * conocemos — y entonces el propio contador no es de fiar.
+   */
+  function verificacionCruzada() {
+    const enTabla = new Set(historial.map((f) => f.id));
+    const contadas = new Set(perdidas.map((p) => p.id).filter((i) => i !== null));
+
+    const faltan = [...idsVistos].filter((id) => !enTabla.has(id) && !vivas.has(id)).sort((a, b) => a - b);
+    const sinExplicar = faltan.filter((id) => !contadas.has(id));
+
+    // Huecos en la numeración: ids que ni siquiera llegaron a abrirse.
+    const todos = [...idsVistos].sort((a, b) => a - b);
+    const huecosNumeracion = [];
+    for (let i = 1; i < todos.length; i++) {
+      for (let n = todos[i - 1] + 1; n < todos[i]; n++) huecosNumeracion.push(n);
+    }
+
+    const totalFrases = idsVistos.size + huecosNumeracion.length;
+    const totalPerdidas = perdidas.length + huecosNumeracion.length;
+
+    return {
+      'frases que entraron': idsVistos.size,
+      'frases en la tabla': enTabla.size,
+      'frases aún en curso': vivas.size,
+      'huecos en la numeración': huecosNumeracion.length,
+      'pérdidas registradas por el contador': perdidas.length,
+      'PORCENTAJE PERDIDO': totalFrases
+        ? `${((totalPerdidas / totalFrases) * 100).toFixed(1)} %`
+        : 'sin datos',
+      '¿cuadra el contador?':
+        sinExplicar.length === 0 && huecosNumeracion.length === 0
+          ? 'SÍ — todas las frases están explicadas'
+          : `NO — ${sinExplicar.length + huecosNumeracion.length} frases desaparecieron sin que ningún ` +
+            'contador las recogiera. Hay una vía de pérdida sin identificar.',
+      'ids sin explicar': [...sinExplicar, ...huecosNumeracion].sort((a, b) => a - b)
+    };
+  }
+
   function resumenPerdidas() {
     const porEtapa = {};
     let segundosTotales = 0;
@@ -409,6 +460,10 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       'frases perdidas': perdidas.length,
       'segundos de vídeo sin doblar': Number(segundosTotales.toFixed(1)),
       'por etapa': porEtapa,
+      'porcentaje del total': (() => {
+        const total = idsVistos.size;
+        return total ? `${((perdidas.length / total) * 100).toFixed(1)} %` : 'sin datos';
+      })(),
       detalle: perdidas.slice(-10)
     };
   }
@@ -417,6 +472,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     vivas.clear();
     historial.length = 0;
     perdidas.length = 0;
+    idsVistos.clear();
     ultimoFinHabla = null;
     console.log(`${LOG} mediciones borradas.`);
   }
@@ -428,6 +484,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     abandonar,
     anotarPerdida,
     resumenPerdidas,
+    verificacionCruzada,
     perdidas: () => perdidas.length,
     filas,
     resumen,

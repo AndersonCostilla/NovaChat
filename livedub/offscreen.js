@@ -1010,8 +1010,22 @@ globalThis.livedub = {
         `(~${r['segundos de vídeo sin doblar']} s de vídeo sin doblar).`
     );
     console.table(r['por etapa']);
+    console.log(`Eso es el ${r['porcentaje del total']} de las frases procesadas.`);
     console.table(r.detalle);
-    return r;
+
+    // VERIFICACIÓN CRUZADA: ¿cuadra el contador con los huecos de la
+    // numeración? Si no cuadra, el propio contador no es de fiar y hay que
+    // decirlo antes de sacar conclusiones de él.
+    const cruce = cronometro.verificacionCruzada();
+    console.log('\n── ¿Es fiable este recuento? ──');
+    console.table(cruce);
+    if (!/^SÍ/.test(cruce['¿cuadra el contador?'])) {
+      console.error(
+        '[LiveDub] ⚠ El contador NO cuadra: hay frases que desaparecieron por una ' +
+          'vía que no está instrumentada. Las cifras de arriba son un MÍNIMO, no el total.'
+      );
+    }
+    return { ...r, verificacionCruzada: cruce };
   },
 
   // El límite teórico: qué pasaría si Whisper y la traducción fueran

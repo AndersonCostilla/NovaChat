@@ -1,3 +1,37 @@
+# Verificación
+
+## Nivel 1 — estática, en el sandbox (un solo comando)
+
+```
+node livedub/tests/nivel1.mjs
+```
+
+**Es obligatoria antes de cada entrega.** Seis comprobaciones:
+
+| | Qué |
+|---|---|
+| 1 | Sintaxis de todos los `.js` (`node --check`) |
+| 2 | **Que cada módulo se IMPORTE de verdad** (`test-modulos-cargan.mjs`) |
+| 3 | Todas las suites de `tests/` en verde |
+| 4 | Ninguna URL remota fuera de comentarios |
+| 5 | `manifest.json` válido, MV3, sin permiso `"tts"`, archivos declarados existentes |
+| 6 | Los tipos de mensaje salen de `messages.js` |
+
+> **Por qué la 2 es fija y no un añadido puntual:** `node --check` dio VERDE
+> sobre un módulo con una cadena de texto sin cerrar que reventaba al
+> importarlo, porque lo analiza como script clásico y no como módulo ES. Se
+> dio por verificado algo que estaba roto. Importar de verdad es la única
+> comprobación que no se deja engañar, y no se quita.
+
+> **El Nivel 1 NO prueba que la extensión funcione.** Comprueba que el
+> código es válido y coherente. Lo que decide si algo sirve es el Nivel 2.
+
+## Nivel 2 — humana, en Chrome
+
+La hace Anderson, con sonido real. Nada se da por verificado sin ella.
+
+---
+
 # Qué está verificado y CÓMO — LiveDub
 
 Este archivo existe para que no haya ambigüedad entre "lo comprobé ejecutándolo"
