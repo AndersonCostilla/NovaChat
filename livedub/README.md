@@ -157,6 +157,59 @@ la suma de esperar a que acabe la frase, transcribirla, traducirla y
 sintetizarla. LiveDub sirve para entender contenido hablado, no para sincronía
 labial.
 
+### El doblaje viene APAGADO de fábrica. Por qué
+
+Es la función más exigente de LiveDub con diferencia, y **en muchos equipos no
+alcanza**. No por falta de potencia bruta, sino porque los tres modelos
+(Whisper, traductor y voz) comparten **un único hilo de WebAssembly**: las
+extensiones MV3 no pueden usar varios núcleos.
+
+**No se recomienda ningún procesador concreto, y es deliberado.** El
+rendimiento de un solo núcleo apenas varía entre procesadores de consumo
+(~1,3-1,5× entre un i5 de 12ª y lo más rápido que se vende), mientras que para
+doblar en tiempo real haría falta más de 4×. Decir «hace falta un i7» llevaría
+a alguien a gastarse dinero para ganar un 30 % donde necesita un 400 %.
+
+En vez de adivinar, **LiveDub mide tu equipo**: tras las tres primeras frases
+calcula cuántos milisegundos le cuesta generar un segundo de voz y dictamina.
+Si no da abasto, **apaga el doblaje y te lo dice en ámbar bajo el
+interruptor** — en vez de leer unas frases sí y otras no, que es lo que hacía
+antes y parecía una avería.
+
+Los subtítulos no dependen de nada de esto y siguen funcionando igual.
+
+### Dos motores de voz, conmutables
+
+El script de descarga baja **los dos** archivos del modelo:
+
+| Archivo | Tamaño | Cuándo |
+|---|---|---|
+| `onnx/model.onnx` | ~114 MB | **Por defecto.** float32 |
+| `onnx/model_quantized.onnx` | ~38 MB | int8 |
+
+Se alterna con **una sola línea**, `VOZ.USAR_CUANTIZADO` en
+[`messages.js`](messages.js), sin volver a descargar nada.
+
+Contra toda intuición, en VITS **la versión cuantizada puede ser la lenta**:
+su decodificador es casi todo convoluciones y ONNX Runtime no ejecuta varias
+de ellas en int8, así que mete conversiones en cada capa. El ejemplo oficial
+del modelo usa float32.
+
+### Diagnóstico
+
+En la consola del documento offscreen:
+
+| Comando | Qué hace |
+|---|---|
+| `livedub.rendimiento()` | Tabla con ms/segundo de audio, expansión y veredicto |
+| `livedub.rendimientoDetalle()` | Los números frase a frase |
+| `livedub.setVelocidadVoz(1.1)` | Cambia la velocidad del doblaje en caliente |
+| `livedub.reintentarVoz()` | Borra las mediciones y reactiva el doblaje |
+| `livedub.doblaje()` | Dónde se pierde la señal del interruptor |
+
+El análisis completo, con los números medidos, está en
+[`docs/RENDIMIENTO-VOZ.md`](docs/RENDIMIENTO-VOZ.md).
+
 | Ajuste | Dónde |
 |---|---|
 | Nivel del ducking (18 %) y rampa | `DUCKING` en `messages.js` |

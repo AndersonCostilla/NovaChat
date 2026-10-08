@@ -304,3 +304,39 @@ no hay hilos de WebAssembly, así que la traducción va en un solo núcleo.
 - El permiso **`scripting`** está declarado pero todavía no se usa:
   se usará en la fase del overlay de subtítulos, para inyectar el overlay
   en la pestaña capturada.
+
+
+## Fase 5.1 — Rendimiento del doblaje (7-oct-2026)
+
+Diagnóstico y decisiones completas en `docs/RENDIMIENTO-VOZ.md`.
+
+### Cerrado en esta entrega
+
+- **`models/verificar-modelos.ps1` ya cubre los TRES modelos.** Era deuda
+  abierta desde la Fase 5: sólo comprobaba transcripción y traducción. Ahora
+  incluye `mms-tts-spa` con sus dos `.onnx`. **Sigue sin ejecutarse en
+  PowerShell real**: no hay `pwsh` en el sandbox.
+- **`popup.html` tenía un `<label>` dentro de otro `<label>`** (HTML inválido):
+  el bloque del doblaje se había insertado dentro del campo «Idioma origen».
+  Mismo parche defectuoso que causó el bug del interruptor. Separado en su
+  propia sección.
+
+### Abierto
+
+- **La hipótesis central de esta fase no está verificada:** que float32 sea
+  más rápido que int8 en VITS. Todo el diseño del motor conmutable existe para
+  poder medirlo. Hasta que Anderson no mida, es teoría.
+- **Acelerar a 1,2× sube el tono** ~3 semitonos. Es un apaño, no una solución.
+  La solución buena sería `speaking_rate` de VITS, que **el bundle vendorizado
+  no implementa** (comprobado: 0 apariciones). Si algún día se actualiza
+  transformers.js, esto es lo primero que habría que revisar.
+- **El emparejamiento frase original ↔ doblaje es aproximado.** La duración
+  del original viaja por una cola corta en `offscreen.js` en vez de por dentro
+  del transcriptor, para no tocar la lógica de transcripción. Si el
+  transcriptor descarta una frase, el dato se desfasa una posición. Sólo
+  afecta a la métrica de expansión, que es diagnóstico, no control.
+- **No se ha medido cuánta CPU le roba el doblaje a la transcripción.** Bloque
+  D de `docs/PRUEBA-NIVEL2-FASE5.1.md`.
+- **`MAX_FRASE_CHUNKS = 47` (12 s) es demasiado para doblar.** Frases de origen
+  más cortas darían doblajes más cortos y menos retraso acumulado. Pero tocar
+  el VAD está fuera de alcance por decisión del usuario; queda anotado.

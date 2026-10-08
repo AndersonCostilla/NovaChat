@@ -79,6 +79,9 @@ export const ESTADO_MODELO_UI = {
   TRADUCIENDO: 'traduciendo',
   SINTETIZANDO: 'sintetizando', // Fase 5: generando la voz
   HABLANDO: 'hablando', // Fase 5: reproduciendo el doblaje
+  // Fase 5.1: el modelo carga y funciona, pero este equipo no genera voz
+  // a tiempo. No es un error: es un veredicto medido.
+  INSUFICIENTE: 'insuficiente',
   ERROR: 'error'
 };
 
@@ -114,3 +117,64 @@ export const DUCKING = {
   NIVEL: 0.18,
   RAMPA_S: 0.25 // rampa suave, nada de cortes bruscos
 };
+
+/* ------------------------------------------------------------------ */
+/* Fase 5.1 — Ajustes de rendimiento de la voz                         */
+/* ------------------------------------------------------------------ */
+//
+// Todos los números de abajo salieron de una medición real en un Intel
+// i5-12400 (ver docs/RENDIMIENTO-VOZ.md). Están aquí, juntos y en el único
+// archivo de constantes del proyecto, para poder tocarlos sin bucear en el
+// código.
+export const VOZ = {
+  // ─── Motor ONNX ───────────────────────────────────────────────────
+  // true  = onnx/model_quantized.onnx (38 MB, int8)
+  // false = onnx/model.onnx           (114 MB, float32)
+  //
+  // Contra toda intuición, en VITS la versión CUANTIZADA puede ser la LENTA:
+  // su decodificador es casi todo convoluciones, y ONNX Runtime no ejecuta
+  // varias de ellas en int8, así que inserta conversiones int8↔float32 en
+  // cada capa. El ejemplo oficial del modelo usa float32 por algo.
+  // Cambia esta línea, recarga la extensión y compara con livedub.rendimiento().
+  USAR_CUANTIZADO: false,
+
+  ARCHIVO_CUANTIZADO: 'onnx/model_quantized.onnx',
+  ARCHIVO_COMPLETO: 'onnx/model.onnx',
+
+  // ─── Velocidad de reproducción ────────────────────────────────────
+  // El español traducido necesita ~20-25 % más sílabas que el inglés y
+  // MMS-TTS habla pausado: el doblaje sale MÁS LARGO que el fragmento que
+  // sustituye, así que se retrasa aunque la síntesis fuese instantánea.
+  // Acelerar la reproducción lo compensa sin gastar ni un ciclo de CPU.
+  //
+  // AVISO: esto es acelerar la cinta, así que el tono sube un poco (1.20 ≈
+  // tres semitonos). Ajustable en caliente con livedub.setVelocidadVoz(1.1).
+  VELOCIDAD: 1.2,
+  VELOCIDAD_MIN: 0.8,
+  VELOCIDAD_MAX: 1.6,
+
+  // Silencio insertado entre oraciones de una misma frase. Estaba en 120 ms,
+  // que sumaba medio segundo en frases de cinco oraciones; 40 ms basta para
+  // que no suene atropellado.
+  PAUSA_ENTRE_ORACIONES_S: 0.04,
+
+  // ─── Banco de medición y veredicto ────────────────────────────────
+  // Cuántos milisegundos cuesta generar un segundo de voz. Por debajo de
+  // 1000 el equipo sintetiza más rápido de lo que dura el audio.
+  MS_POR_SEGUNDO_OBJETIVO: 1000,
+  // Margen: hay que ir holgadamente por debajo, porque la síntesis comparte
+  // un único hilo con Whisper y el traductor.
+  MS_POR_SEGUNDO_LIMITE: 850,
+  // Mediciones necesarias antes de emitir un veredicto sobre el equipo.
+  MUESTRAS_PARA_VEREDICTO: 3,
+  // Estimación inicial, sólo hasta tener medidas propias (caracteres/segundo
+  // de voz que produce MMS-TTS en español).
+  CARACTERES_POR_SEGUNDO: 14,
+  // Techo de espera por frase antes de ni siquiera intentarla.
+  PRESUPUESTO_MS: 15000
+};
+
+// Resuelve qué archivo .onnx toca según el interruptor de arriba.
+export function archivoOnnxVoz(usarCuantizado = VOZ.USAR_CUANTIZADO) {
+  return usarCuantizado ? VOZ.ARCHIVO_CUANTIZADO : VOZ.ARCHIVO_COMPLETO;
+}

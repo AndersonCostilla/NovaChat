@@ -42,18 +42,24 @@
     </section>
 
     <section class="bloque">
+      <label class="interruptor">
+        <input type="checkbox" id="doblajeVoz" />
+        <span>Leer traducción en voz alta</span>
+      </label>
+      <p class="ayuda">
+        Genera la voz en español y baja el volumen del vídeo mientras habla.
+        <strong>Apagado de fábrica</strong>: añade varios segundos de retardo y
+        exige bastante CPU. Los subtítulos funcionan igual de bien sin esto.
+      </p>
+      <p class="ayuda" id="avisoDoblaje">
+        Requiere descargar aparte el modelo de voz. LiveDub mide tu equipo en
+        las primeras frases y, si no da abasto, apaga el doblaje y te lo dice.
+      </p>
+    </section>
+
+    <section class="bloque">
       <label class="campo">
         <span>Idioma origen</span>
-        <label class="interruptor">
-          <input type="checkbox" id="doblajeVoz" />
-          <span>Leer traducción en voz alta</span>
-        </label>
-        <p class="ayuda">
-          Genera la voz en español y baja el volumen del vídeo mientras habla.
-          Añade unos segundos de retardo y consume CPU: déjalo apagado si sólo
-          quieres subtítulos.
-        </p>
-
         <select id="idiomaOrigen">
           <option value="auto">Detectar automáticamente</option>
           <option value="es">Español</option>

@@ -18,6 +18,7 @@
 
 import { pipeline, env } from './libs/transformers/transformers.min.js';
 import { trocearEnOraciones } from './segmentador.js';
+import { VOZ, archivoOnnxVoz } from './messages.js';
 
 const ENTRADA = { INIT: 'INIT', SINTETIZAR: 'SINTETIZAR' };
 const SALIDA = {
@@ -37,11 +38,15 @@ const LOG = '[LiveDub][sintetizador-worker]';
 // Archivos que transformers.js pide para un modelo VITS cuantizado.
 // Ojo a la diferencia con OPUS-MT: aquí hay UN SOLO .onnx, no encoder +
 // decoder, porque VITS no es un modelo encoder-decoder.
+//
+// Fase 5.1: cuál de los dos .onnx se exige depende de VOZ.USAR_CUANTIZADO
+// (messages.js). El script de descarga baja LOS DOS, así que alternar entre
+// ellos es cambiar una línea y recargar: no hay que volver a descargar nada.
 const ARCHIVOS_MODELO = [
   { ruta: 'config.json', obligatorio: true },
   { ruta: 'tokenizer.json', obligatorio: true },
   { ruta: 'tokenizer_config.json', obligatorio: true },
-  { ruta: 'onnx/model_quantized.onnx', obligatorio: true }
+  { ruta: archivoOnnxVoz(), obligatorio: true }
 ];
 
 /* ------------------------------------------------------------------ */
@@ -120,8 +125,12 @@ async function cargarModelo() {
   cargando = comprobarArchivos()
     .then(() => {
       console.log(`${LOG} archivos verificados, arrancando el pipeline…`);
+      console.log(
+        `${LOG} motor: ${VOZ.USAR_CUANTIZADO ? 'CUANTIZADO int8' : 'COMPLETO float32'} ` +
+          `(${archivoOnnxVoz()})`
+      );
       return pipeline('text-to-speech', idModelo, {
-        quantized: true,
+        quantized: VOZ.USAR_CUANTIZADO,
         progress_callback: (info) => {
           if (info?.status && info.status !== 'progress') {
             console.log(`${LOG} ${info.status}${info.file ? ` · ${info.file}` : ''}`);
@@ -157,8 +166,12 @@ async function cargarModelo() {
 
 // Une varias ondas en una sola, con un pequeño silencio entre oraciones para
 // que el resultado no suene atropellado.
+//
+// Fase 5.1: el silencio bajó de 120 ms a 40 ms. En una frase de cinco
+// oraciones eran casi medio segundo de doblaje extra que no dice nada y que
+// se suma al retraso contra el vídeo.
 function concatenar(ondas, hz) {
-  const silencio = Math.round(hz * 0.12); // 120 ms entre oraciones
+  const silencio = Math.round(hz * VOZ.PAUSA_ENTRE_ORACIONES_S);
   const total = ondas.reduce((n, o) => n + o.length, 0) + silencio * Math.max(0, ondas.length - 1);
   const salida = new Float32Array(total);
 
@@ -203,8 +216,13 @@ async function sintetizar({ id, texto }) {
   const duracionMs = Math.round(performance.now() - inicio);
   const segundosAudio = (audio.length / hz).toFixed(2);
 
+  // Fase 5.1: la métrica que de verdad sirve es MS POR SEGUNDO DE AUDIO.
+  // "x veces tiempo real" engaña, porque depende de lo larga que sea la frase;
+  // ms/s es comparable entre una frase de 3 s y una de 20 s.
+  const msPorSegundo = Math.round(duracionMs / Number(segundosAudio));
   console.log(
-    `${LOG} frase #${id}: ${segundosAudio} s de voz generados en ${duracionMs} ms ` +
+    `${LOG} frase #${id}: ${segundosAudio} s de voz en ${duracionMs} ms · ` +
+      `${msPorSegundo} ms por segundo de audio ` +
       `(x${(Number(segundosAudio) / (duracionMs / 1000)).toFixed(2)} tiempo real)`
   );
 
@@ -218,7 +236,11 @@ async function sintetizar({ id, texto }) {
       muestras: audio.length,
       hz,
       trozos: trozos.length,
-      duracionMs
+      duracionMs,
+      // Datos crudos para el banco de medición (rendimiento-voz.js).
+      caracteres: texto.length,
+      segundosAudio: Number(segundosAudio),
+      msPorSegundo
     },
     [audio.buffer]
   );

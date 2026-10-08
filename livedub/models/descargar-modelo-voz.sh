@@ -29,7 +29,20 @@ ARCHIVOS=(
   "tokenizer_config.json"
   # VITS es de UNA SOLA PIEZA: aquí no hay encoder + decoder como en OPUS-MT,
   # y tampoco hace falta vocoder ni speaker embeddings (eso es de SpeechT5).
+  #
+  # Fase 5.1: se bajan LOS DOS motores, porque cuál es el rápido depende del
+  # equipo y sólo se sabe midiendo. Teniéndolos los dos en disco, alternar es
+  # cambiar VOZ.USAR_CUANTIZADO en livedub/messages.js y recargar: no hay que
+  # volver a descargar nada.
+  #
+  #   model_quantized.onnx → ~38 MB, int8.
+  #   model.onnx           → ~114 MB, float32. En VITS suele ser el RÁPIDO,
+  #                          porque su decodificador es casi todo
+  #                          convoluciones y ONNX Runtime no las ejecuta en
+  #                          int8: mete conversiones de ida y vuelta en cada
+  #                          capa. El ejemplo oficial del modelo usa float32.
   "onnx/model_quantized.onnx"
+  "onnx/model.onnx"
 )
 
 # Archivos que, si faltan, NO deben hacer fracasar el script: algunos repos
@@ -110,4 +123,13 @@ if [ "${#fallidos[@]}" -gt 0 ]; then
 fi
 
 echo
-echo "Modelo de voz completo. Recarga la extensión en chrome://extensions y vuelve a Iniciar."
+echo "Modelo de voz completo (los DOS motores: int8 y float32)."
+echo
+echo "Motor activo ahora mismo: mira VOZ.USAR_CUANTIZADO en livedub/messages.js"
+echo "   false -> onnx/model.onnx           (114 MB, float32)  <- por defecto"
+echo "   true  -> onnx/model_quantized.onnx (38 MB,  int8)"
+echo
+echo "Recarga la extensión en chrome://extensions y vuelve a Iniciar."
+echo "Con el doblaje activo, escribe  livedub.rendimiento()  en la consola del"
+echo "documento offscreen para ver qué tal se le da a tu equipo."
+

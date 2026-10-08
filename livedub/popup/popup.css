@@ -186,6 +186,24 @@ select {
   gap: 3px;
 }
 .modelo--error    { background: #3a1b1b; color: #ff9b9b; }
+/* Fase 5.1: el equipo no da abasto para el doblaje. Ámbar, no rojo: no es un
+   fallo del programa, es una limitación medida del equipo. */
+.modelo--insuficiente { background: #3a2f16; color: #f0c674; }
+
+/* Texto de ayuda bajo los controles. */
+.ayuda {
+  margin: 4px 0 0;
+  font-size: 11px;
+  line-height: 1.4;
+  color: #9aa0a6;
+}
+
+/* Aviso destacado bajo el interruptor de voz. */
+.ayuda--alerta {
+  color: #f0c674;
+  border-left: 3px solid #f0c674;
+  padding-left: 8px;
+}
 .modelo--sintetizando { background: #1f2d3a; color: #9fd0ff; }
 .modelo--hablando     { background: #143a2e; color: #6ff0c0; }
 

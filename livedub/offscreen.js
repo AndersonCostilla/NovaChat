@@ -25,7 +25,11 @@ import { MSG, TARGET, ESTADO_MODELO_UI, MODULO } from './messages.js';
 import { crearTranscriptor } from './transcriptor.js';
 import { crearTraductor } from './traductor.js';
 import { crearSintetizador } from './sintetizador.js';
-import { crearReproductorDoblaje } from './reproductor-doblaje.js';
+import {
+  crearReproductorDoblaje,
+  fijarVelocidadDoblaje,
+  obtenerVelocidadDoblaje
+} from './reproductor-doblaje.js';
 import { detectarIdioma, NOMBRE_IDIOMA } from './detector-idioma.js';
 
 const INTERVALO_NIVEL_MS = 100; // cada cuánto enviamos el nivel al popup
@@ -71,6 +75,18 @@ let reproductor = null;
 // Fase 5: el doblaje por voz se activa desde el popup. Por defecto apagado:
 // añade latencia y carga de CPU, y el usuario debe poder usar sólo subtítulos.
 let doblajeActivo = false;
+
+// Fase 5.1. Duración (en segundos) de los últimos fragmentos de audio ORIGINAL
+// detectados por el VAD. Sirve para calcular la EXPANSIÓN: cuánto más largo es
+// el doblaje que el trozo de vídeo al que sustituye.
+//
+// APROXIMACIÓN DELIBERADA: se lleva como cola corta en vez de pasar el dato por
+// dentro del transcriptor, porque la regla del proyecto es no tocar la lógica
+// de transcripción. Si el transcriptor descarta una frase por ir saturado, este
+// emparejamiento puede desfasarse una posición. Es un dato de diagnóstico
+// agregado, no entra en ninguna decisión de corrección.
+const duracionesOrigen = [];
+const MAX_DURACIONES_ORIGEN = 3;
 // Preferencia del popup. OJO: el documento offscreen SÓLO tiene acceso a
 // chrome.runtime; chrome.storage es undefined aquí. Por eso se pide por
 // mensaje al service worker y él avisa de los cambios (SETTINGS_CHANGED).
@@ -249,6 +265,9 @@ function ensamblarChunks(chunks) {
 function onFraseDetectada(float32Array) {
   const segundos = (float32Array.length / FRECUENCIA_PROCESO).toFixed(2);
 
+  duracionesOrigen.push(Number(segundos));
+  while (duracionesOrigen.length > MAX_DURACIONES_ORIGEN) duracionesOrigen.shift();
+
   // Si el modelo no está disponible seguimos en modo "solo captura": el VAD
   // sigue trabajando y la extensión no se rompe, simplemente no hay subtítulo.
   const aceptada = transcriptor?.transcribir(float32Array, idiomaOrigen);
@@ -343,19 +362,31 @@ function montarDoblaje() {
 
   sintetizador = crearSintetizador({
     onEstado: (info) => publicarEstadoModelo(info, MODULO.SINTESIS),
-    onActividad: (ocupado) =>
+    onActividad: (ocupado) => {
+      // OJO: "ya no estoy ocupado" NO debe pisar un veredicto de equipo
+      // insuficiente ni un error. Si no, la insignia volvería a decir "Voz
+      // lista" justo después de avisar de que el doblaje se apagó.
+      const actual = sintetizador?.obtenerEstado();
+      if (actual === 'insuficiente' || actual === 'error') return;
       publicarEstadoModelo(
         {
           estado: ocupado ? ESTADO_MODELO_UI.SINTETIZANDO : ESTADO_MODELO_UI.LISTO,
           detalle: ocupado ? 'Generando la voz…' : 'Voz lista'
         },
         MODULO.SINTESIS
+      );
+    },
+    onRendimiento: (info) =>
+      console.log(
+        `[LiveDub] Rendimiento de la voz: ${info.msPorSegundoAudio} ms por segundo de audio ` +
+          `(${info.veredicto}). Detalle con livedub.rendimiento()`
       ),
     onError: (error) => console.warn('[LiveDub] Error sintetizando una frase:', error)
   });
 
-  // El modelo de voz sólo se carga si el doblaje está activado: son ~38 MB y
-  // CPU que no tiene sentido gastar si el usuario sólo quiere subtítulos.
+  // El modelo de voz sólo se carga si el doblaje está activado: son 38 o 114 MB
+  // (según VOZ.USAR_CUANTIZADO) y CPU que no tiene sentido gastar si el usuario
+  // sólo quiere subtítulos. Por eso el interruptor viene apagado de fábrica.
   if (doblajeActivo) arrancarSintetizador();
 }
 
@@ -497,7 +528,7 @@ async function traducirYPublicar({ texto, idiomaDetectado, duracionMs }) {
   // Fase 5: el doblaje se lanza SIN esperar (no bloquea la publicación del
   // subtítulo). El texto aparece en pantalla cuanto antes y la voz llega
   // después; es justo el desfase que documentamos.
-  if (doblajeActivo && traduccion) doblar(traduccion);
+  if (doblajeActivo && traduccion) doblar(traduccion, duracionesOrigen.shift() ?? null);
 
   return publicarSubtitulo({
     texto,
@@ -510,8 +541,8 @@ async function traducirYPublicar({ texto, idiomaDetectado, duracionMs }) {
 }
 
 // Genera la voz y la reproduce agachando el audio original.
-async function doblar(textoEspanol) {
-  const resultado = await (sintetizador?.sintetizar(textoEspanol) ??
+async function doblar(textoEspanol, segundosOrigen = null) {
+  const resultado = await (sintetizador?.sintetizar(textoEspanol, { segundosOrigen }) ??
     Promise.resolve({ audio: null, motivo: 'voz no iniciada' }));
 
   if (!resultado.audio) {
@@ -729,6 +760,48 @@ globalThis.livedub = {
     console.table(info);
     return info;
   },
+
+  // Fase 5.1. Informe de rendimiento de la voz: la tabla que antes había que
+  // reconstruir a mano a partir de decenas de líneas de log. Uso:
+  //   livedub.rendimiento()
+  rendimiento: () => {
+    if (!sintetizador) {
+      console.log('[LiveDub] No hay sintetizador: inicia la captura y activa el doblaje.');
+      return null;
+    }
+    const info = sintetizador.rendimiento();
+    console.table({
+      'motor en uso': info.motor,
+      'velocidad de reproducción': `x${info.velocidadReproduccion}`,
+      'frases medidas': info.muestras,
+      'ms por segundo de audio': info.msPorSegundoAudio ?? '(sin datos)',
+      'veces tiempo real': info.vecesTiempoReal ?? '(sin datos)',
+      'el doblaje dura x veces el original': info.expansionMedia ?? '(sin datos)',
+      'descartadas sin intentarlas': info.descartadasSinIntentar,
+      'descartadas por retraso': info.descartadasPorTiempo,
+      veredicto: info.veredicto
+    });
+    console.log(sintetizador.explicacionRendimiento());
+    return info;
+  },
+
+  // Detalle frase a frase, por si hace falta pegar los números crudos.
+  rendimientoDetalle: () => {
+    const filas = sintetizador?.detalleRendimiento() ?? [];
+    console.table(filas);
+    return filas;
+  },
+
+  // Cambia la velocidad del doblaje en caliente para juzgarla de oído.
+  setVelocidadVoz: (v) => {
+    const nueva = fijarVelocidadDoblaje(v);
+    console.log(`[LiveDub] Velocidad del doblaje: x${nueva} (afecta a la próxima frase).`);
+    return nueva;
+  },
+  velocidadVoz: () => obtenerVelocidadDoblaje(),
+
+  // Borra las mediciones y reactiva el doblaje si se había apagado solo.
+  reintentarVoz: () => sintetizador?.reintentar() ?? null,
 
   // Permite afinar el VAD en caliente, sin recargar la extensión.
   vadInfo: () => ({ VAD_THRESHOLD, MAX_SILENCE_CHUNKS, MAX_FRASE_CHUNKS }),

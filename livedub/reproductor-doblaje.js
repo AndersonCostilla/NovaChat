@@ -11,9 +11,25 @@
 // Este módulo NO sintetiza nada: recibe una onda ya generada. Y no toca
 // chrome.* en absoluto: vive dentro del documento offscreen.
 
-import { DUCKING } from './messages.js';
+import { DUCKING, VOZ } from './messages.js';
 
 const LOG = '[LiveDub][doblaje]';
+
+// Fase 5.1. Velocidad de reproducción del doblaje. Es un ajuste vivo: se puede
+// cambiar desde la consola con livedub.setVelocidadVoz(1.1) para juzgar de
+// oído, porque acelerar sube también el tono.
+let velocidad = VOZ.VELOCIDAD;
+
+export function fijarVelocidadDoblaje(valor) {
+  const v = Number(valor);
+  if (!Number.isFinite(v)) return velocidad;
+  velocidad = Math.min(VOZ.VELOCIDAD_MAX, Math.max(VOZ.VELOCIDAD_MIN, v));
+  return velocidad;
+}
+
+export function obtenerVelocidadDoblaje() {
+  return velocidad;
+}
 
 /**
  * @param {object} opciones
@@ -95,6 +111,11 @@ export function crearReproductorDoblaje({ obtenerCadena, onHablando } = {}) {
 
     const fuente = contexto.createBufferSource();
     fuente.buffer = buffer;
+    // POR QUÉ SE ACELERA: el doblaje en español dura más que el fragmento
+    // original que sustituye (más sílabas + voz pausada), así que se retrasaría
+    // aunque la síntesis fuese instantánea. Acelerar la reproducción recupera
+    // ese tiempo sin gastar CPU. El precio es que el tono sube un poco.
+    fuente.playbackRate.value = velocidad;
     fuente.connect(contexto.destination);
 
     reproduciendo = true;
@@ -102,8 +123,12 @@ export function crearReproductorDoblaje({ obtenerCadena, onHablando } = {}) {
     agachar(ganancia, contexto);
     onHablando?.(true);
 
-    const segundos = (tarea.audio.length / tarea.hz).toFixed(2);
-    console.log(`${LOG} reproduciendo ${segundos} s de doblaje (original al ${DUCKING.NIVEL * 100} %)`);
+    const segundos = tarea.audio.length / tarea.hz;
+    const oidos = (segundos / velocidad).toFixed(2);
+    console.log(
+      `${LOG} reproduciendo ${segundos.toFixed(2)} s de doblaje en ${oidos} s ` +
+        `(velocidad x${velocidad}, original al ${DUCKING.NIVEL * 100} %)`
+    );
 
     fuente.onended = () => {
       fuente.disconnect();

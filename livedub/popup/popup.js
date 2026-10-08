@@ -26,6 +26,8 @@ const elEstadoModelo = document.getElementById('estadoModelo');
 const elEstadoTraductor = document.getElementById('estadoTraductor');
 const elEstadoVoz = document.getElementById('estadoVoz');
 const elDoblaje = document.getElementById('doblajeVoz');
+const elAvisoDoblaje = document.getElementById('avisoDoblaje');
+const AVISO_DOBLAJE_INICIAL = elAvisoDoblaje?.textContent?.trim() || '';
 
 let estadoActual = ESTADO.INACTIVO;
 
@@ -180,6 +182,10 @@ const ETIQUETAS_MODELO = {
     listo: 'Voz lista',
     sintetizando: 'Generando voz…',
     hablando: 'Hablando…',
+    // Fase 5.1. No es un fallo: el modelo va bien, es el equipo el que no
+    // alcanza. Se dice con otras palabras para no dar a entender que algo
+    // está roto.
+    insuficiente: 'Equipo insuficiente',
     error: 'Voz no disponible'
   }
 };
@@ -204,6 +210,25 @@ function pintarEstadoModelo(info, modulo = MODULO.TRANSCRIPCION) {
   elemento.className = `modelo modelo--${estado}`;
   // El detalle completo (causa del error, por ejemplo) al pasar el ratón.
   elemento.title = info?.detalle || '';
+
+  // El veredicto de rendimiento se escribe a la vista, no sólo en el title:
+  // es justo el mensaje que evita que el usuario crea que está roto.
+  if (modulo === MODULO.SINTESIS) mostrarAvisoDoblaje(estado, info?.detalle || '');
+}
+
+// Mensaje bajo el interruptor de voz. Cambia según el estado del módulo.
+function mostrarAvisoDoblaje(estado, detalle) {
+  if (!elAvisoDoblaje) return;
+
+  if (estado === 'insuficiente' || estado === 'error') {
+    elAvisoDoblaje.textContent = detalle || 'El doblaje no está disponible en este equipo.';
+    elAvisoDoblaje.className = 'ayuda ayuda--alerta';
+    if (elDoblaje) elDoblaje.checked = false;
+    return;
+  }
+
+  elAvisoDoblaje.textContent = AVISO_DOBLAJE_INICIAL;
+  elAvisoDoblaje.className = 'ayuda';
 }
 
 // Al abrir el popup recuperamos el historial. Fuente principal: el service

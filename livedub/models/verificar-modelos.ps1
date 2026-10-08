@@ -1,5 +1,6 @@
 # verificar-modelos.ps1
-# Comprueba que los pesos de los DOS modelos estan completos y no truncados.
+# Comprueba que los pesos de los TRES modelos estan completos y no truncados.
+# (transcripcion, traduccion y voz)
 #
 # Utilidad de desarrollo: NO forma parte de lo que carga Chrome.
 #
@@ -46,6 +47,20 @@ $Modelos = @(
             'onnx\encoder_model_quantized.onnx',
             'onnx\decoder_model_merged_quantized.onnx'
         )
+    },
+    @{
+        # Fase 5. VITS es de una sola pieza: un solo .onnx, sin encoder +
+        # decoder. Se comprueban los DOS motores porque el script de descarga
+        # baja ambos y se alternan desde livedub\messages.js (VOZ.USAR_CUANTIZADO).
+        Nombre   = 'mms-tts-spa (voz)'
+        Carpeta  = 'mms-tts-spa'
+        Archivos = @(
+            'config.json',
+            'tokenizer.json',
+            'tokenizer_config.json',
+            'onnx\model_quantized.onnx',
+            'onnx\model.onnx'
+        )
     }
 )
 
@@ -87,12 +102,13 @@ foreach ($modelo in $Modelos) {
 
 Write-Host ''
 if ($problemas -eq 0) {
-    Write-Host 'TODO CORRECTO: los dos modelos estan completos.' -ForegroundColor Green
+    Write-Host 'TODO CORRECTO: los tres modelos estan completos.' -ForegroundColor Green
     exit 0
 }
 else {
     Write-Host "HAY $problemas PROBLEMA(S). Vuelve a descargar lo que aparezca en rojo." -ForegroundColor Red
-    Write-Host 'Traduccion:   bash livedub/models/descargar-modelo-traductor.sh'
     Write-Host 'Transcripcion: bash livedub/models/descargar-modelo.sh'
+    Write-Host 'Traduccion:    bash livedub/models/descargar-modelo-traductor.sh'
+    Write-Host 'Voz:           bash livedub/models/descargar-modelo-voz.sh'
     exit 1
 }

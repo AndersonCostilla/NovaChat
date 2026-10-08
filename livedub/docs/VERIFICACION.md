@@ -151,3 +151,28 @@ limpio tras cada corte). El audio real nunca se ha reproducido aquí.
 | 12 | Que el doblaje suene y el ducking se perciba suave | **PENDIENTE (humano)** | requiere Chrome y altavoces |
 | 13 | Nombres de archivo reales del repo `Xenova/mms-tts-spa` | VERIFICADO (humano) | los 4 archivos descargaron bien; `model_quantized.onnx` = 38.362.987 bytes |
 | 14 | `popup.js` se carga y el interruptor de voz envía `SET_DOBLAJE` | EJECUTADO (`tests/test-popup.mjs`) | 21/21 — verificada reintroduciendo el bug |
+
+
+## Fase 5.1 — Rendimiento de la voz (Nivel 1, estático en sandbox)
+
+Origen: la primera prueba en Chrome real reveló que la síntesis va a 0,5× tiempo
+real y empeora a 0,27×. Diagnóstico completo en `docs/RENDIMIENTO-VOZ.md`.
+
+| # | Qué se verificó | Estado | Resultado |
+|---|---|---|---|
+| 1 | `node --check` en los 17 `.js` del proyecto | EJECUTADO | sin errores |
+| 2 | Cero URLs remotas en código propio | EJECUTADO | 0 coincidencias |
+| 3 | El bundle **no** implementa `speaking_rate` / `length_scale` / `noise_scale` | EJECUTADO (lectura del bundle) | 0 apariciones de cada uno → no hay palanca de velocidad en el modelo |
+| 4 | No existe `ort-wasm-simd-threaded.wasm` vendorizado | EJECUTADO (`ls libs/transformers/*.wasm`) | sólo `ort-wasm-simd.wasm` → el multihilo está descartado |
+| 5 | El banco declara `insuficiente` con los 8 datos REALES del i5-12400 | EJECUTADO (`tests/test-rendimiento-voz.mjs`) | 38/38 |
+| 6 | El veredicto se emite **una sola vez**, no por frase | EJECUTADO (`tests/test-rendimiento-voz.mjs`) | 1 emisión con 8 muestras |
+| 7 | Sin 3 muestras no se emite veredicto | EJECUTADO (`tests/test-rendimiento-voz.mjs`) | correcto |
+| 8 | Se rechaza una frase larga **sin** sintetizarla | EJECUTADO (`tests/test-rendimiento-voz.mjs`) | con motivo y estimación en ms |
+| 9 | `playbackRate` se aplica de verdad al nodo de audio | EJECUTADO (`tests/test-doblaje.mjs`) | = `VOZ.VELOCIDAD`, con topes |
+| 10 | `onActividad(false)` no pisa el veredicto `insuficiente` | EJECUTADO (lectura + guarda explícita en `offscreen.js`) | guarda presente |
+| 11 | `popup.html` sin `<label>` anidados | EJECUTADO (recuento de apertura/cierre) | profundidad máxima 1 |
+| 12 | `verificar-modelos.ps1` cubre los **tres** modelos | EJECUTADO (lectura) | incluye `mms-tts-spa` con sus dos `.onnx` |
+| 13 | **Si float32 es más rápido que int8 en este equipo** | **PENDIENTE (humano) — es la hipótesis central** | sin medir |
+| 14 | Cuánto recorta la expansión acelerar a 1,2× | **PENDIENTE (humano)** | sin medir |
+| 15 | Si el tono a 1,2× resulta molesto al oído | **PENDIENTE (humano)** | criterio subjetivo |
+| 16 | `verificar-modelos.ps1` ejecutado en PowerShell real | **PENDIENTE (humano)** | no hay PowerShell en el sandbox |

@@ -145,8 +145,10 @@ comprobar(
 /* ------------------------------------------------------------------ */
 console.log('\n4) reproductor-doblaje.js (ducking)');
 
-const { crearReproductorDoblaje } = await import('../reproductor-doblaje.js');
-const { DUCKING } = await import('../messages.js');
+const { crearReproductorDoblaje, fijarVelocidadDoblaje, obtenerVelocidadDoblaje } = await import(
+  '../reproductor-doblaje.js'
+);
+const { DUCKING, VOZ } = await import('../messages.js');
 
 // AudioContext simulado, suficiente para observar las rampas de ganancia.
 const rampas = [];
@@ -178,6 +180,9 @@ function crearCadenaFalsa() {
         onended: null,
         conectado: false,
         parado: false,
+        // Fase 5.1: el reproductor acelera el doblaje para compensar que el
+        // español dura más que el original. El nodo real trae un AudioParam.
+        playbackRate: { value: 1 },
         connect() {
           this.conectado = true;
         },
@@ -214,6 +219,26 @@ comprobar('al empezar a hablar, el original se agacha', cadena.ganancia.gain.val
 comprobar('el nivel de ducking está entre el 15 % y el 20 %', DUCKING.NIVEL >= 0.15 && DUCKING.NIVEL <= 0.2, String(DUCKING.NIVEL));
 comprobar('avisa de que está hablando', hablando[0] === true);
 comprobar('la fuente se conectó y arrancó', fuentesCreadas[0]?.conectado && fuentesCreadas[0]?.iniciado);
+
+// Fase 5.1. El doblaje se reproduce acelerado: el español traducido dura más
+// que el fragmento original, así que sin esto se retrasaría aunque la síntesis
+// fuese instantánea.
+comprobar(
+  'el doblaje se reproduce acelerado',
+  fuentesCreadas[0]?.playbackRate.value === VOZ.VELOCIDAD,
+  `playbackRate = ${fuentesCreadas[0]?.playbackRate.value}`
+);
+comprobar(
+  'la velocidad por defecto es mayor que 1 pero no caricaturesca',
+  VOZ.VELOCIDAD > 1 && VOZ.VELOCIDAD <= 1.3,
+  String(VOZ.VELOCIDAD)
+);
+comprobar('se puede bajar la velocidad en caliente', fijarVelocidadDoblaje(1.05) === 1.05);
+comprobar('no se puede pasar del máximo', fijarVelocidadDoblaje(99) === VOZ.VELOCIDAD_MAX);
+comprobar('ni bajar del mínimo', fijarVelocidadDoblaje(0.1) === VOZ.VELOCIDAD_MIN);
+comprobar('un valor absurdo no rompe nada', fijarVelocidadDoblaje('hola') === VOZ.VELOCIDAD_MIN);
+fijarVelocidadDoblaje(VOZ.VELOCIDAD); // restaurar para el resto de la prueba
+comprobar('se restauró la velocidad por defecto', obtenerVelocidadDoblaje() === VOZ.VELOCIDAD);
 
 // Fin de la reproducción
 fuentesCreadas[0].onended();

@@ -86,3 +86,27 @@ Cada script termina con código 0 si pasa y 1 si falla.
 
 Ninguna prueba Chrome, Web Audio, WASM ni el modelo: eso sólo se
 valida a mano (ver `docs/PRUEBA-NIVEL2.md`).
+
+
+## `test-rendimiento-voz.mjs` (Fase 5.1)
+
+Prueba el banco de medición de la voz (`rendimiento-voz.js`): la aritmética que
+decide si este equipo puede con el doblaje.
+
+**Lo que la hace valiosa:** se alimenta con las **ocho mediciones reales** que
+Anderson sacó de su i5-12400 el 7 de octubre de 2026, las mismas que provocaron
+este cambio. No son números inventados para que pase: son la prueba de
+regresión. Si el banco dejase de declarar «insuficiente» ante esos datos, el
+banco no serviría.
+
+Cubre: que ms/segundo es estable donde «x tiempo real» engaña, los cuatro
+veredictos, que no se opina sin tres muestras, que el veredicto se emite una
+sola vez, el rechazo de frases antes de gastar CPU, el cálculo de la expansión,
+el reinicio de mediciones y que datos basura no envenenan la media.
+
+```
+node livedub/tests/test-rendimiento-voz.mjs     # 38/38
+```
+
+`test-doblaje.mjs` se amplió además con la velocidad de reproducción
+(`playbackRate`) y sus topes.
