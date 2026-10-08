@@ -15,6 +15,24 @@ export const ESTADO_TRADUCTOR = {
 
 const RUTA_WORKER = 'traductor-worker.js';
 const MAX_EN_COLA = 4; // traducir texto es rápido; aguanta más cola que Whisper
+// TIEMPOS (revisados el 8-oct-2026, tras el episodio de #4, #5 y #6).
+//
+// EL BUG QUE HABÍA. Al vencer TIMEOUT_MS se daba la frase por perdida pero
+// NO se liberaba el hueco del worker, porque el worker estaba dentro de una
+// llamada a generate() sin puntos de corte y no podía acusar la cancelación.
+// El hueco no volvía hasta que el rescate reiniciaba el worker, 20 s más
+// tarde: 50 s de tubería parada, recarga de 113 MB y cola vaciada de golpe.
+//
+// POR QUÉ NO SE ARREGLA LIBERANDO EL HUECO A LA FUERZA. Porque eso es
+// exactamente el bug que se arregló el 7-oct: declarar libre un worker que
+// sigue ocupado mete dos generate() a la vez en el mismo núcleo y va PEOR.
+//
+// CÓMO SE ARREGLA DE VERDAD. Dándole al worker puntos donde pueda parar.
+// traductor-worker.js traduce ahora por grupos de 8 oraciones, cede el turno
+// entre grupo y grupo y se autoimpone un presupuesto de 12 s, al cabo del
+// cual devuelve lo que lleve marcado como PARCIAL. Con eso el worker se
+// libera solo y estos dos temporizadores pasan a ser lo que siempre
+// debieron ser: una red de seguridad que casi nunca se usa.
 const TIMEOUT_MS = 30000; // 30 s por frase: si no, se da por perdida
 
 // Vigilante de carga. El modelo está en disco (unos 113 MB): cargarlo son
@@ -24,7 +42,15 @@ const TIMEOUT_MS = 30000; // 30 s por frase: si no, se da por perdida
 const TIMEOUT_CARGA_MS = 90000;
 
 // Margen para que el worker acuse una cancelación antes de darlo por colgado.
-const TIMEOUT_RESCATE_MS = 20000;
+//
+// Antes eran 20 s, elegidos cuando el worker podía tardar lo que quisiera en
+// reaccionar. Ya no: con los puntos de abandono, lo máximo que puede tardar
+// en atender un CANCELAR es lo que dure el grupo que tiene entre manos. Se
+// deja en 15 s, que es holgado para un grupo de 8 oraciones, y así el peor
+// caso de tubería parada baja de 50 s a 45 s en el único escenario que queda
+// vivo: una sola oración que por sí sola tarde más de 30 s. Ese caso no se
+// puede trocear más, y por eso el rescate sigue existiendo.
+const TIMEOUT_RESCATE_MS = 15000;
 
 // A partir de cuántos trozos en un mismo lote se considera anómalo. El habla
 // normal da 1-2 trozos por frase (medido con segmentador.js); una alucinación
@@ -156,10 +182,19 @@ export function crearTraductor({ onEstado, onActividad, onError, onTrabajo } = {
         // Si no es el que esperábamos, es el de una frase ya dada por perdida:
         // no libera el hueco y no se procesa como actual.
         if (!liberarSi(mensaje.id)) break;
+        if (mensaje.parcial) {
+          console.warn(
+            `${LOG} frase #${mensaje.id}: traducción PARCIAL ` +
+              `(${mensaje.trozosTraducidos} de ${mensaje.trozos} trozos). ` +
+              'Se entrega marcada; el resto de la frase no se dobla.'
+          );
+        }
         resolverPendiente(mensaje.id, {
           traduccion: mensaje.traduccion,
           duracionMs: mensaje.duracionMs,
-          trozos: mensaje.trozos // nº de oraciones en que se partió la frase
+          trozos: mensaje.trozos, // nº de oraciones en que se partió la frase
+          trozosTraducidos: mensaje.trozosTraducidos ?? mensaje.trozos,
+          parcial: Boolean(mensaje.parcial)
         });
         procesarCola();
         break;

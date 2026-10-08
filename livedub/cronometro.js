@@ -421,11 +421,22 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
   }
 
   /** Registra contenido perdido en cualquier etapa de la tubería. */
-  function anotarPerdida({ id = null, segundos = null, etapa = 'desconocida', detalle = '' }) {
+  function anotarPerdida({
+    id = null,
+    segundos = null,
+    etapa = 'desconocida',
+    detalle = '',
+    // Una PÉRDIDA PARCIAL no termina la frase: la mitad traducida se va a
+    // doblar igual y su desfase hay que seguir midiéndolo. Si se cerrase
+    // aquí, la frase saldría de la tabla antes de sonar y las columnas de
+    // voz quedarían vacías. Por defecto sí se cierra, que es el caso normal.
+    cerrarFrase = true
+  }) {
     perdidas.push({ id, segundos, etapa, detalle, cuando: ahora() });
     while (perdidas.length > MAX_FRASES * 2) perdidas.shift();
-    // Si la frase estaba abierta, se cierra con el motivo real.
-    if (id !== null && vivas.has(id)) cerrar(id, { motivoFinal: `PERDIDA en ${etapa}: ${detalle}` });
+    if (cerrarFrase && id !== null && vivas.has(id)) {
+      cerrar(id, { motivoFinal: `PERDIDA en ${etapa}: ${detalle}` });
+    }
   }
 
   /**
@@ -505,6 +516,9 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     marcar,
     cerrar,
     abandonar,
+    // Las traducciones REALES de esta sesión, para poder enseñar ejemplos
+    // de recorte sobre frases de verdad en vez de sobre frases inventadas.
+    textosTraducidos: () => historial.map((f) => f.traduccion).filter((t) => typeof t === 'string' && t.trim()),
     anotarLote,
     anotarPerdida,
     resumenPerdidas,

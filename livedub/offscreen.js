@@ -28,8 +28,20 @@ import { crearMotorVoz } from './motor-voz.js';
 import { fijarVelocidadDoblaje, obtenerVelocidadDoblaje } from './reproductor-doblaje.js';
 import { detectarIdioma, NOMBRE_IDIOMA } from './detector-idioma.js';
 import { crearCronometro, MOTIVO_CIERRE } from './cronometro.js';
+import { recortar, recortarLote, OBJETIVO_POR_DEFECTO } from './recortador.js';
 
 const INTERVALO_NIVEL_MS = 100; // cada cuánto enviamos el nivel al popup
+
+/* ------------------- Recorte de traducciones --------------------- */
+// Opción A: acortar el español para bajar la ocupación por debajo del 100 %.
+//
+// ARRANCA APAGADO A PROPÓSITO. Es un cambio que afecta a lo que el
+// espectador oye, así que no se activa solo: hay que verlo primero con
+// livedub.recorteEjemplos() y encenderlo a mano con livedub.recorte(true).
+// Reversible en caliente, sin recargar nada y sin tocar el resto de la
+// tubería: con el recorte apagado, el texto pasa tal cual.
+let recorteActivo = false;
+let recorteObjetivo = OBJETIVO_POR_DEFECTO;
 
 /* ---------------------- Constantes del VAD ------------------------ */
 // Ajustables: dependen del material de audio.
@@ -562,6 +574,26 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
     traduccion = resultado.traduccion || '';
     duracionTraduccionMs = resultado.duracionMs || 0;
 
+    // PARCIAL: el worker agotó su presupuesto y devolvió lo que llevaba.
+    // Suena lo traducido, pero el resto de la frase no se dobla, así que se
+    // avisa y se cuenta. La regla del proyecto es que no hay continuidad a
+    // base de omitir contenido en silencio.
+    if (resultado.parcial && traduccion) {
+      const faltan = (resultado.trozos ?? 0) - (resultado.trozosTraducidos ?? 0);
+      aviso = `Frase doblada a medias: faltan ${faltan} de ${resultado.trozos} oraciones.`;
+      registrarPerdida({
+        id,
+        segundos:
+          typeof duracionMs === 'number' && resultado.trozos
+            ? Number(((duracionMs / 1000) * (faltan / resultado.trozos)).toFixed(2))
+            : null,
+        etapa: 'traducción (parcial)',
+        detalle: `${resultado.trozosTraducidos} de ${resultado.trozos} oraciones traducidas`,
+        // La parte traducida SÍ se dobla: la frase sigue viva y midiéndose.
+        cerrarFrase: false
+      });
+    }
+
     if (!traduccion) {
       motivoTraduccion = resultado.motivo || resultado.error || estadoTraductor || 'desconocido';
       // Degradación independiente: sin traducción, pero el subtítulo se publica.
@@ -575,6 +607,21 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
   // Fase 5: el doblaje se lanza SIN esperar (no bloquea la publicación del
   // subtítulo). El texto aparece en pantalla cuanto antes y la voz llega
   // después; es justo el desfase que documentamos.
+  // RECORTE (opción A). Se aplica después de traducir y antes de hablar.
+  // El subtítulo enseña el MISMO texto que se pronuncia: si la voz dice una
+  // cosa y el subtítulo otra, el espectador no sabe a cuál creer.
+  let recorte = null;
+  if (recorteActivo && traduccion) {
+    recorte = recortar(traduccion, { objetivo: recorteObjetivo });
+    if (recorte.texto && recorte.texto !== traduccion) {
+      cronometro.marcar(id, 'tRecorte', {
+        traduccionSinRecortar: traduccion,
+        reduccionRecorte: recorte.reduccion
+      });
+      traduccion = recorte.texto;
+    }
+  }
+
   if (doblajeActivo && traduccion) {
     doblar(traduccion, duracionesOrigen.shift() ?? null, id);
   } else if (!doblajeActivo) {
@@ -624,8 +671,8 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
  * se avisa al popup. Antes, el descarte de la cola de Whisper no dejaba
  * rastro en ningún sitio.
  */
-function registrarPerdida({ id = null, segundos = null, etapa, detalle = '' }) {
-  cronometro.anotarPerdida({ id, segundos, etapa, detalle });
+function registrarPerdida({ id = null, segundos = null, etapa, detalle = '', cerrarFrase = true }) {
+  cronometro.anotarPerdida({ id, segundos, etapa, detalle, cerrarFrase });
   const total = cronometro.perdidas();
 
   console.warn(
@@ -1050,6 +1097,84 @@ globalThis.livedub = {
       );
     }
     return { ...r, verificacionCruzada: cruce };
+  },
+
+  /* ---------------- Recorte de traducciones (opción A) -------------- */
+
+  // Enciende o apaga el recorte en caliente. Sin argumento, sólo informa.
+  // Uso: livedub.recorte()  ·  livedub.recorte(true)  ·  livedub.recorte(false)
+  recorte: (encendido) => {
+    if (encendido === undefined) {
+      return {
+        activo: recorteActivo,
+        'objetivo de reducción': `${Math.round(recorteObjetivo * 100)} %`,
+        'cómo encenderlo': 'livedub.recorte(true)',
+        'cómo apagarlo': 'livedub.recorte(false)',
+        'ver ejemplos antes de decidir': 'livedub.recorteEjemplos()'
+      };
+    }
+    recorteActivo = Boolean(encendido);
+    console.log(
+      `[LiveDub] recorte de traducciones ${recorteActivo ? 'ENCENDIDO' : 'APAGADO'}. ` +
+        'Afecta sólo a las frases siguientes; no hay que recargar nada.'
+    );
+    return recorteActivo;
+  },
+
+  // Cambia cuánto se recorta (0.10 - 0.15 es la horquilla acordada).
+  recorteObjetivo: (fraccion) => {
+    if (fraccion === undefined) return recorteObjetivo;
+    const v = Number(fraccion);
+    if (!(v > 0 && v < 0.5)) return 'Dame una fracción entre 0 y 0.5 (por ejemplo 0.12).';
+    recorteObjetivo = v;
+    return `Objetivo de recorte: ${Math.round(v * 100)} %`;
+  },
+
+  /**
+   * ANTES/DESPUÉS con las frases REALES de esta sesión.
+   *
+   * No inventa ejemplos: usa las traducciones que el cronómetro tiene
+   * guardadas de las frases ya dobladas. Si no hay bastantes, lo dice en vez
+   * de rellenar con frases de muestra.
+   *
+   * Uso: livedub.recorteEjemplos()  ·  livedub.recorteEjemplos(10)
+   */
+  recorteEjemplos: (cuantas = 10) => {
+    const textos = cronometro.textosTraducidos().slice(-cuantas);
+    if (textos.length === 0) {
+      console.warn(
+        '[LiveDub] Todavía no hay traducciones en esta sesión. Deja correr el vídeo ' +
+          'un par de minutos y vuelve a pedirlo.'
+      );
+      return null;
+    }
+    if (textos.length < cuantas) {
+      console.warn(
+        `[LiveDub] Sólo hay ${textos.length} frases traducidas, no ${cuantas}. ` +
+          'La muestra es corta: déjalo correr más para juzgar mejor.'
+      );
+    }
+
+    const lote = recortarLote(textos, { objetivo: recorteObjetivo });
+    const tabla = lote.filas.map((f, i) => ({
+      '#': i + 1,
+      ANTES: f.original,
+      DESPUÉS: f.texto,
+      '−%': `${(f.reduccion * 100).toFixed(1)} %`,
+      's ahorrados': f.segundosAhorrados,
+      'reglas usadas': f.reglas.join(' · ') || '(ninguna)'
+    }));
+    console.table(tabla);
+    console.log(
+      `Reducción media: ${(lote.reduccionMedia * 100).toFixed(1)} % · ` +
+        `${lote.segundosAhorrados} s ahorrados en ${textos.length} frases · ` +
+        `${lote.frasesSinTocar} frases no se tocaron.`
+    );
+    console.log(
+      'Lee los DESPUÉS en voz alta. Si alguno suena mal o pierde algo, dímelo y ' +
+        'quito esa regla; el recorte sigue APAGADO hasta que digas que sí.'
+    );
+    return { tabla, resumen: lote };
   },
 
   // El límite teórico: qué pasaría si Whisper y la traducción fueran

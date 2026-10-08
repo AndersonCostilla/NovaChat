@@ -42,6 +42,44 @@ const NUM_BEAMS = 1;
 const TOKENS_MINIMOS = 64;
 const TOKENS_MAXIMOS = 512;
 
+/* ------------------------------------------------------------------ */
+/* Lote con continuación (8-oct-2026)                                  */
+/* ------------------------------------------------------------------ */
+//
+// POR QUÉ. Antes, todas las oraciones de una frase iban en UNA sola llamada
+// a generate(). Como esa llamada no tiene puntos intermedios, el worker se
+// quedaba ciego y sordo hasta terminarla: no podía atender el CANCELAR, el
+// hueco no se liberaba, y el rescate de traductor.js acababa reiniciando el
+// worker 50 s después, vaciando la cola de paso. Una alucinación repetitiva
+// de Whisper ("Thank you." x40) bastaba para tirar cuatro frases seguidas.
+//
+// Ahora se traduce por GRUPOS, con un punto de abandono entre grupo y grupo.
+
+// Cuántas oraciones van en cada llamada a generate().
+//
+// El número sale de medir, no de elegir: con habla real, segmentador.js
+// devuelve 1-2 trozos por frase, y una frase tope de 12,03 s a ritmo normal
+// no pasa de 3-4 oraciones. Con 8, el troceo NO SE ACTIVA NUNCA con habla
+// legítima — sólo sobre las alucinaciones repetitivas, que es justo lo que
+// se quiere acotar. Por debajo de 8 se empezaría a trocear habla normal y se
+// perdería el ahorro de agrupar sin ganar nada a cambio.
+const TROZOS_POR_GRUPO = 8;
+
+// Tiempo máximo que esta frase puede ocupar el worker. Al terminar un grupo,
+// si se ha pasado, se devuelve lo traducido hasta ahí MARCADO COMO PARCIAL
+// y se libera el worker.
+//
+// El número tampoco es arbitrario: 12 s es lo que dura como mucho una frase
+// (MAX_FRASE_CHUNKS = 47 bloques x 256 ms = 12,03 s). Si traducir una frase
+// cuesta más de lo que la frase dura, el doblaje ya no se recupera: cada
+// frase empujaría a la siguiente para siempre. Gastar más tiempo ahí no
+// salva esa frase, sólo se lleva por delante las que vienen detrás.
+//
+// Importante: este presupuesto es MENOR que el TIMEOUT_MS de traductor.js
+// (30 s). Esa diferencia es deliberada — así el worker devuelve lo que tenga
+// ANTES de que el orquestador se canse, y la parte traducida no se pierde.
+const PRESUPUESTO_MS = 12000;
+
 // Todo lo que este worker escriba en consola lleva este prefijo, para poder
 // filtrar por "traductor" en las DevTools del documento offscreen.
 const LOG = '[LiveDub][traductor-worker]';
@@ -227,12 +265,54 @@ async function traducir({ id, texto }) {
     maxTokens
   });
 
-  const salida = await modelo(entradas, {
-    max_new_tokens: maxTokens,
-    num_beams: NUM_BEAMS
-  });
+  // Se le pasa de TROZOS_POR_GRUPO en TROZOS_POR_GRUPO para que haya puntos
+  // donde parar. Con habla normal sólo hay un grupo: es exactamente lo mismo
+  // que antes, misma llamada y mismo coste.
+  const lista = [];
+  let abandonadoEn = -1;
 
-  const lista = Array.isArray(salida) ? salida : [salida];
+  for (let i = 0; i < entradas.length; i += TROZOS_POR_GRUPO) {
+    // Punto de abandono 1: nos han cancelado mientras trabajábamos.
+    if (estaCancelado(id)) {
+      abandonadoEn = i;
+      break;
+    }
+    // Punto de abandono 2: esta frase ya ha gastado su tiempo. Nunca antes
+    // del primer grupo: toda frase tiene derecho a intentarse una vez.
+    if (i > 0 && performance.now() - inicio > PRESUPUESTO_MS) {
+      abandonadoEn = i;
+      console.warn(
+        `${LOG} frase #${id}: presupuesto de ${PRESUPUESTO_MS / 1000} s agotado tras ` +
+          `${i} de ${entradas.length} trozo(s). Se devuelve lo traducido y se libera el worker.`
+      );
+      break;
+    }
+
+    const parte = await modelo(entradas.slice(i, i + TROZOS_POR_GRUPO), {
+      max_new_tokens: maxTokens,
+      num_beams: NUM_BEAMS
+    });
+    lista.push(...(Array.isArray(parte) ? parte : [parte]));
+
+    // CEDER EL TURNO. Esta línea es la que hace que todo lo anterior sirva
+    // de algo, y no es nada evidente: los mensajes que llegan al worker son
+    // MACROtareas, y `await` sobre una promesa ya resuelta sólo drena
+    // MICROtareas. Sin este setTimeout(0), el CANCELAR no se entrega jamás y
+    // el bucle de grupos no se entera de nada: parecería implementado y no
+    // haría nada. Comprobado ejecutándolo, en tests/test-lote-continuacion.mjs.
+    if (i + TROZOS_POR_GRUPO < entradas.length) {
+      await new Promise((resolver) => setTimeout(resolver, 0));
+    }
+  }
+
+  cancelados.delete(id);
+
+  // Si nos cancelaron ANTES de traducir nada, no hay nada que devolver.
+  if (abandonadoEn === 0) {
+    console.warn(`${LOG} frase #${id}: abandonada sin traducir nada.`);
+    self.postMessage({ type: SALIDA.CANCELADO, id });
+    return;
+  }
   const perdidas = [];
   const parciales = lista.map((item, i) => {
     const crudo = item?.translation_text ?? '';
@@ -261,11 +341,22 @@ async function traducir({ id, texto }) {
 
   console.log(`${LOG} frase #${id} traducida en ${duracionMs} ms (${trozos.length} trozo(s))`);
 
+  // Una traducción a medias NUNCA se entrega en silencio: va marcada, y
+  // aguas arriba se cuenta como pérdida parcial y se avisa en el subtítulo.
+  const parcial = abandonadoEn > 0;
+  if (parcial) {
+    console.warn(
+      `${LOG} frase #${id}: PARCIAL — ${lista.length} de ${trozos.length} trozo(s) traducidos.`
+    );
+  }
+
   self.postMessage({
     type: SALIDA.RESULTADO,
     id,
     traduccion,
     trozos: trozos.length,
+    trozosTraducidos: lista.length,
+    parcial,
     terminosProtegidos: totalMarcas,
     duracionMs
   });
