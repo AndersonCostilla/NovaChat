@@ -365,6 +365,45 @@ chrome.runtime.onMessage.addListener((mensaje) => {
 });
 
 /* ------------------------------------------------------------------ */
+/* Doblaje por voz (Fase 5)                                            */
+/* ------------------------------------------------------------------ */
+
+// El valor real vive en chrome.storage.local, y de eso manda el service
+// worker. El popup sólo refleja lo que le digan.
+async function cargarInterruptorDoblaje() {
+  if (!elDoblaje) return;
+  try {
+    const r = await chrome.runtime.sendMessage({
+      type: MSG.GET_SETTINGS,
+      target: TARGET.BACKGROUND
+    });
+    elDoblaje.checked = Boolean(r?.doblaje);
+  } catch (error) {
+    console.warn('[LiveDub] No se pudo leer la preferencia de doblaje:', error?.message || error);
+    elDoblaje.checked = false;
+  }
+}
+
+if (elDoblaje) {
+  elDoblaje.addEventListener('change', async () => {
+    const activo = elDoblaje.checked;
+    console.log(`[LiveDub] Interruptor de doblaje -> ${activo ? 'ACTIVADO' : 'desactivado'}`);
+    try {
+      await chrome.runtime.sendMessage({
+        type: MSG.SET_DOBLAJE,
+        target: TARGET.BACKGROUND,
+        activo
+      });
+    } catch (error) {
+      console.warn('[LiveDub] No se pudo guardar la preferencia de doblaje:', error?.message || error);
+      elDoblaje.checked = !activo; // deshacer: que la casilla no mienta
+    }
+  });
+} else {
+  console.error('[LiveDub] No se encontró la casilla #doblajeVoz en el HTML del popup.');
+}
+
+/* ------------------------------------------------------------------ */
 /* Arranque                                                            */
 /* ------------------------------------------------------------------ */
 

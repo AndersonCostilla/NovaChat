@@ -149,4 +149,5 @@ limpio tras cada corte). El audio real nunca se ha reproducido aquí.
 | 10 | Los archivos nuevos no usan APIs de `chrome` prohibidas | EJECUTADO (`tests/test-offscreen-apis.mjs`) | 11/11 |
 | 11 | Latencia real de la síntesis en Chrome | **PENDIENTE (humano)** | estimado 0,5-2 s, sin medir |
 | 12 | Que el doblaje suene y el ducking se perciba suave | **PENDIENTE (humano)** | requiere Chrome y altavoces |
-| 13 | Nombres de archivo reales del repo `Xenova/mms-tts-spa` | **NO VERIFICADO** | sin acceso a huggingface.co desde el sandbox |
+| 13 | Nombres de archivo reales del repo `Xenova/mms-tts-spa` | VERIFICADO (humano) | los 4 archivos descargaron bien; `model_quantized.onnx` = 38.362.987 bytes |
+| 14 | `popup.js` se carga y el interruptor de voz envía `SET_DOBLAJE` | EJECUTADO (`tests/test-popup.mjs`) | 21/21 — verificada reintroduciendo el bug |

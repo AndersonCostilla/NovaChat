@@ -17,6 +17,7 @@ node livedub/tests/test-traductor-vigilante.mjs  # límite de tiempo de carga de
 node livedub/tests/test-segmentador.mjs  # troceo en oraciones y truncamiento de OPUS-MT
 node livedub/tests/test-terminos-protegidos.mjs  # nombres propios que no se traducen
 node livedub/tests/test-doblaje.mjs  # síntesis de voz, cola y ducking
+node livedub/tests/test-popup.mjs   # el popup se carga y sus controles responden
 ```
 
 Cada script termina con código 0 si pasa y 1 si falla.
@@ -76,6 +77,12 @@ Cada script termina con código 0 si pasa y 1 si falla.
   (efecto bombeo) y se restaura al parar o al apagar el interruptor. También
   prueba el vigilante de 90 s del sintetizador y que las tres claves de estado
   de módulo son distintas.
+
+- **`test-popup.mjs`** monta un DOM simulado con los diez elementos de
+  `popup.html`, importa `popup.js` **de verdad** y dispara los eventos de los
+  controles. Es la única prueba que detecta errores de EJECUCIÓN en el popup
+  (funciones no definidas, controles sin manejador): `node --check` no puede
+  verlos porque sólo mira la sintaxis. Nació de un bug real de la Fase 5.
 
 Ninguna prueba Chrome, Web Audio, WASM ni el modelo: eso sólo se
 valida a mano (ver `docs/PRUEBA-NIVEL2.md`).

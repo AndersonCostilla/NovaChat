@@ -715,6 +715,21 @@ globalThis.livedub = {
     frasesDescartadas,
     idiomaOrigen
   }),
+  // Diagnóstico del doblaje: dice en una línea legible si el interruptor
+  // llegó, si el worker existe y en qué estado está. Uso: livedub.doblaje()
+  doblaje: () => {
+    const info = {
+      'interruptor recibido por el offscreen': doblajeActivo ? 'SÍ (activado)' : 'no (desactivado)',
+      'objeto sintetizador creado': sintetizador ? 'sí' : 'NO — ¿se inició la captura?',
+      'estado del modelo de voz': sintetizador?.obtenerEstado() ?? 'inactivo',
+      'reproductor creado': reproductor ? 'sí' : 'no',
+      'hablando ahora': reproductor?.estaHablando() ? 'sí' : 'no',
+      'frases de voz en cola': reproductor?.enCola() ?? 0
+    };
+    console.table(info);
+    return info;
+  },
+
   // Permite afinar el VAD en caliente, sin recargar la extensión.
   vadInfo: () => ({ VAD_THRESHOLD, MAX_SILENCE_CHUNKS, MAX_FRASE_CHUNKS }),
   setVadThreshold: (v) => {

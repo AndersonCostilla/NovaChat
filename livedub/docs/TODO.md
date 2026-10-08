@@ -36,6 +36,29 @@ Decisiones que conviene recordar:
   estado de síntesis habría ido a parar a la clave de Whisper y habría pisado
   el estado de la transcripción. Detectado al integrar, cubierto por prueba.
 
+### Bug de entrega: el interruptor de voz no estaba conectado
+
+Reportado por Anderson en la primera prueba. La casilla no hacía nada y no
+aparecía ni un log del sintetizador.
+
+Causa: al integrar el popup usé una sustitución de texto cuyo ancla no
+coincidía con el archivo real. La sustitución **no se aplicó y no avisó de
+nada**. Resultado: `popup.js` llamaba a `cargarInterruptorDoblaje()` sin
+definirla, y la casilla se quedó sin manejador de `change`.
+
+**Por qué no lo detectó la verificación de Nivel 1:** `node --check` sólo mira
+sintaxis. Llamar a una función inexistente es un error de EJECUCIÓN. Ninguna
+prueba cargaba `popup.js`.
+
+Mitigado con `tests/test-popup.mjs`, que monta un DOM simulado, importa
+`popup.js` de verdad y dispara el evento del interruptor. Verificada
+reintroduciendo el bug: falla con `ReferenceError: cargarInterruptorDoblaje is
+not defined`.
+
+**Regla de proceso que me impongo:** toda sustitución de texto sobre un archivo
+existente se verifica después con un `grep` del símbolo insertado. Que el
+parche no reviente no significa que se haya aplicado.
+
 Pendiente de Nivel 2: `docs/PRUEBA-NIVEL2-FASE5.md`.
 
 # TODO / deuda técnica de LiveDub
