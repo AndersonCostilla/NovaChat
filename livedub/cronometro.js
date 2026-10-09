@@ -792,8 +792,32 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    * Con el tope anterior de 40, el primer tercio de una sesión larga ya se
    * había borrado cuando se iba a mirar.
    */
-  function deriva() {
-    const n = historial.length;
+  function deriva({ sinEventos = false } = {}) {
+    // EL CONTROL DE "MISMO TRABAJO DE ENTRADA" ESTABA MAL ELEGIDO.
+    //
+    // Esta función comparaba la duración mediana del AUDIO entre tercios
+    // para descartar que el tiempo hubiera subido porque las frases eran
+    // más largas. Pero costeWhisper() ya ha medido que lo que mueve el
+    // reloj de Whisper no es la duración del audio: son los CARACTERES
+    // (R² = 0,646 en la tanda de Anderson, 9,92 ms por carácter). Dos
+    // tercios pueden tener frases de la misma duración y textos muy
+    // distintos, y entonces "x1,38 sobre el mismo trabajo" no significa
+    // lo que parece.
+    //
+    // Ahora se mira también la mediana de caracteres y, sobre todo, el
+    // tiempo NORMALIZADO: lo observado dividido por lo que predice el
+    // ajuste de esta misma sesión. Eso quita el efecto del tamaño del
+    // texto y deja sólo lo que no se explica por él.
+    const ajuste = costeWhisper();
+    const predecir = (caracteres) =>
+      typeof ajuste['coste FIJO del encoder (ms)'] === 'number' && typeof caracteres === 'number'
+        ? ajuste['coste FIJO del encoder (ms)'] +
+          ajuste['coste por carácter del decoder (ms)'] * caracteres
+        : null;
+
+    const catastroficas = new Set(eventosCatastroficos().sucesos.map((s) => s['#']));
+    const base = sinEventos ? historial.filter((f) => !catastroficas.has(f.id)) : historial;
+    const n = base.length;
     if (n < 9) {
       return {
         '¿se puede responder?': `NO — hacen falta al menos 9 frases y hay ${n}.`
@@ -802,9 +826,9 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
 
     const corte = Math.floor(n / 3);
     const tercios = [
-      { nombre: 'primer tercio', frases: historial.slice(0, corte) },
-      { nombre: 'tercio central', frases: historial.slice(corte, n - corte) },
-      { nombre: 'último tercio', frases: historial.slice(n - corte) }
+      { nombre: 'primer tercio', frases: base.slice(0, corte) },
+      { nombre: 'tercio central', frases: base.slice(corte, n - corte) },
+      { nombre: 'último tercio', frases: base.slice(n - corte) }
     ];
 
     const ms = (a, b) => (a !== null && b !== null ? b - a : null);
@@ -815,7 +839,19 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       'duración frase mediana (s)': mediana(frases.map((f) => f.segundosAudio)),
       'trozos MT mediana': mediana(frases.map((f) => f.trozosMt)),
       // El coste. Whisper es el testigo limpio: su trabajo es casi fijo.
+      // El trabajo que de verdad mueve el reloj de Whisper.
+      'caracteres mediana': mediana(frases.map((f) => f.caracteres)),
       'Whisper mediana (ms)': mediana(frases.map((f) => ms(f.tFinHabla, f.tFinAsr))),
+      // Observado ÷ predicho por el ajuste. Si esto se mantiene cerca de 1
+      // en los tres tercios, el tiempo subió porque subió el texto, no
+      // porque la máquina se degradara.
+      'Whisper normalizado': mediana(
+        frases.map((f) => {
+          const real = ms(f.tFinHabla, f.tFinAsr);
+          const esperado = predecir(f.caracteres);
+          return real !== null && esperado > 0 ? Number((real / esperado).toFixed(2)) : null;
+        })
+      ),
       'traducción mediana (ms)': mediana(frases.map((f) => ms(f.tFinAsr, f.tFinMt))),
       'grupo MT más caro (ms)': Math.max(
         0,
@@ -828,30 +864,68 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     const ultimo = tabla[2]['Whisper mediana (ms)'];
     const factor = primero && ultimo ? Number((ultimo / primero).toFixed(2)) : null;
 
-    const entradaCrecio =
-      tabla[0]['duración frase mediana (s)'] &&
-      tabla[2]['duración frase mediana (s)'] > tabla[0]['duración frase mediana (s)'] * 1.3;
+    // El mismo factor, pero sobre el tiempo ya descontado el tamaño del
+    // texto. Éste es el que de verdad contesta a la pregunta.
+    const normPrimero = tabla[0]['Whisper normalizado'];
+    const normUltimo = tabla[2]['Whisper normalizado'];
+    const factorNorm =
+      normPrimero && normUltimo ? Number((normUltimo / normPrimero).toFixed(2)) : null;
+
+    const textoCrecio =
+      tabla[0]['caracteres mediana'] &&
+      tabla[2]['caracteres mediana'] > tabla[0]['caracteres mediana'] * 1.2;
 
     let veredicto;
     if (factor === null) veredicto = 'NO SE SABE — falta el tiempo de Whisper en alguno de los tercios.';
     else if (factor < 1.3) veredicto = `NO — Whisper va x${factor} al final. Eso es ruido, no deriva.`;
-    else if (entradaCrecio)
+    else if (factorNorm !== null && factorNorm < 1.3)
       veredicto =
-        `OJO — Whisper va x${factor}, pero las frases TAMBIÉN se alargaron. ` +
+        `NO — Whisper va x${factor} en bruto, pero x${factorNorm} una vez descontado el ` +
+        'tamaño del texto. Lo que creció fue el TEXTO, no la lentitud de la máquina.';
+    else if (textoCrecio)
+      veredicto =
+        `OJO — Whisper va x${factor} y los textos también crecieron ` +
+        `(${tabla[0]['caracteres mediana']} → ${tabla[2]['caracteres mediana']} caracteres). ` +
         'Parte del aumento es trabajo de más, no degradación.';
-    else
+    else if (factorNorm === null) {
+      // Sin caracteres no se puede normalizar. Se cae al control viejo —la
+      // duración del audio— y se DICE que es un control peor, en vez de
+      // presentar como seguro un veredicto que no lo es.
+      const audioCrecio =
+        tabla[0]['duración frase mediana (s)'] &&
+        tabla[2]['duración frase mediana (s)'] > tabla[0]['duración frase mediana (s)'] * 1.3;
+      veredicto = audioCrecio
+        ? `OJO — Whisper va x${factor} y las frases también se alargaron. ` +
+          'Parte del aumento es trabajo de más. (Sin caracteres no se puede afinar más.)'
+        : `SÍ (con reservas) — Whisper va x${factor} y las frases duran lo mismo. ` +
+          'No hay recuento de caracteres para descontar el tamaño del texto, que es ' +
+          'lo que de verdad mueve el reloj de Whisper.';
+    } else
       veredicto =
-        `SÍ — Whisper va x${factor} al final sobre el mismo trabajo de entrada. ` +
-        'Eso es degradación, no frases más largas.';
+        `SÍ — Whisper va x${factor} al final (x${factorNorm} descontando el texto). ` +
+        'Eso es degradación de la máquina.';
 
-    return {
+    const resultado = {
       '¿se degrada con el tiempo?': veredicto,
+      'frases incluidas': sinEventos ? `${n} (excluidos los eventos catastróficos)` : n,
       tramos: tabla,
       'cómo leer esto':
-        'Whisper es el testigo limpio: su coste es casi fijo (chunk_length_s = 30), ' +
-        'así que si su mediana se multiplica sin que crezca la duración de las frases, ' +
-        'lo que se ha degradado es la máquina, no la entrada.'
+        'Lo que mueve el reloj de Whisper NO es la duración del audio: son los ' +
+        'caracteres que tiene que generar (medido en costeWhisper()). Por eso la ' +
+        'columna que manda es "Whisper normalizado" = observado ÷ predicho por el ' +
+        'ajuste de esta sesión. Si se mantiene plana en los tres tercios, no hay deriva.'
     };
+
+    // Y la comparación que separa "una sesión con un evento" de "una
+    // máquina que se degrada": la misma cuenta sin las frases catastróficas.
+    if (!sinEventos && catastroficas.size) {
+      const limpio = deriva({ sinEventos: true });
+      resultado['¿y sin los eventos catastróficos?'] =
+        limpio['¿se degrada con el tiempo?'] ?? limpio['¿se puede responder?'];
+      resultado['eventos excluidos'] = [...catastroficas];
+    }
+
+    return resultado;
   }
 
   /**
@@ -933,6 +1007,73 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
         'Esto es una recta ajustada a esta sesión, no una ley. Con pocas frases ' +
         'largas la pendiente es poco fiable: hace falta al menos una alucinación ' +
         'en la muestra para que el extremo esté representado.'
+    };
+  }
+
+  /**
+   * ¿UN TOPE DE max_new_tokens CORTARÍA ALGUNA FRASE REAL?
+   *
+   * Es la pregunta del punto 1 del encargo, y NO se puede contestar con un
+   * razonamiento: hay que mirar las frases que de verdad han pasado por
+   * aquí. Esto recorre el historial, traduce el tope de tokens a
+   * caracteres y enseña UNA POR UNA las que se habrían cortado, diciendo
+   * de cada una si el detector la consideraba sospechosa o no.
+   *
+   * La que importa es la última columna: una frase larga que el detector
+   * NO marcó como sospechosa es, hasta que se demuestre lo contrario,
+   * HABLA REAL. Si aparece alguna, el tope corta contenido.
+   *
+   * @param {number} tokens  tope a probar (el propuesto son 180)
+   * @param {number} caracteresPorToken  ~4 en inglés
+   */
+  function probarTope(tokens = 180, caracteresPorToken = 4) {
+    const topeCaracteres = Math.round(tokens * caracteresPorToken);
+    const conTexto = historial.filter((f) => typeof f.caracteres === 'number' && f.caracteres > 0);
+
+    if (!conTexto.length) {
+      return { '¿se puede responder?': 'NO — no hay ninguna frase con texto en esta sesión.' };
+    }
+
+    const cortadas = conTexto
+      .filter((f) => f.caracteres > topeCaracteres)
+      .map((f) => ({
+        '#': f.id,
+        caracteres: f.caracteres,
+        'tokens aprox.': Math.round(f.caracteres / caracteresPorToken),
+        'audio (s)': f.segundosAudio,
+        'trozos MT': f.trozosMt,
+        'se habría perdido': `${f.caracteres - topeCaracteres} caracteres`,
+        // LA COLUMNA QUE DECIDE.
+        '¿el detector la vio rara?': f.sospechosaAlucinacion ? 'sí (alucinación)' : '⚠ NO — ¿habla real?'
+      }));
+
+    const sospechosas = cortadas.filter((c) => c['¿el detector la vio rara?'].startsWith('sí'));
+    const limpias = cortadas.filter((c) => !c['¿el detector la vio rara?'].startsWith('sí'));
+    const masLarga = conTexto.reduce((a, f) => (f.caracteres > a.caracteres ? f : a), conTexto[0]);
+    const masLargaLimpia = conTexto
+      .filter((f) => !f.sospechosaAlucinacion)
+      .reduce((a, f) => (!a || f.caracteres > a.caracteres ? f : a), null);
+
+    return {
+      'tope probado': `${tokens} tokens ≈ ${topeCaracteres} caracteres`,
+      'frases con texto': conTexto.length,
+      'se habrían cortado': cortadas.length,
+      '· de ellas, sospechosas de alucinación': sospechosas.length,
+      '· de ellas, NO sospechosas (habla real)': limpias.length,
+      '¿es seguro este tope?': limpias.length
+        ? `NO — ${limpias.length} frase(s) que el detector consideró NORMALES se habrían cortado.`
+        : 'SÍ — en esta sesión sólo habría tocado frases ya marcadas como sospechosas.',
+      'frase más larga de la sesión': `#${masLarga.id}: ${masLarga.caracteres} caracteres` +
+        (masLarga.sospechosaAlucinacion ? ' (sospechosa)' : ' (NO sospechosa)'),
+      'frase más larga NO sospechosa': masLargaLimpia
+        ? `#${masLargaLimpia.id}: ${masLargaLimpia.caracteres} caracteres ` +
+          `≈ ${Math.round(masLargaLimpia.caracteres / caracteresPorToken)} tokens ` +
+          `(margen hasta el tope: x${(topeCaracteres / masLargaLimpia.caracteres).toFixed(1)})`
+        : 'ninguna',
+      detalle: cortadas,
+      aviso:
+        'Una sola sesión no basta: si ninguna frase real se acerca al tope aquí, ' +
+        'puede acercarse en otro vídeo. Mira el margen de la frase más larga NO sospechosa.'
     };
   }
 
@@ -1026,6 +1167,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     anotarAlucinacion,
     anotarGrupos,
     costeWhisper,
+    probarTope,
     segundosAudioDe,
     eventosCatastroficos,
     deriva,

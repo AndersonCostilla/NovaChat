@@ -61,6 +61,19 @@ Con los dos puntos:
 **Esto es un modelo de dos puntos, no una medición.** Con dos puntos siempre
 sale una recta: eso no la hace cierta.
 
+> ### ⚠ MEDIDO EL 9-OCT: ESTAS CIFRAS QUEDAN OBSOLETAS
+>
+> `costeWhisper()` corrido sobre datos reales de Anderson da
+> **3.243 ms fijos + 9,92 ms por carácter, R² = 0,646.**
+>
+> La pendiente medida (9,92 ms/carácter ≈ 39,7 ms/token a 4 caracteres por
+> token) casi coincide con los 42,8 estimados, así que la hipótesis se
+> sostiene. **Pero el coste fijo real es casi el doble del estimado** y el
+> R² dice que el texto explica sólo **dos tercios** de la variación.
+>
+> **Usa siempre las cifras medidas.** Lo de abajo se conserva como registro
+> de cómo se llegó a la hipótesis, no como número válido.
+
 ---
 
 ## 3. Antes de proponer nada: medirlo. `livedub.costeWhisper()`
@@ -98,8 +111,12 @@ Poner un techo al número de tokens que el decoder puede generar.
 **Lo que ahorra**, con el modelo de arriba y un tope de 180 tokens:
 
 ```
-1.830 + 180 × 42,8 ≈ 9,5 s   en vez de 21 s
+MEDIDO:    3.243 + 720 car × 9,92 ≈ 10,4 s   en vez de los 18,7 s de la #22
+(obsoleto: 1.830 + 180 tok × 42,8 ≈ 9,5 s   en vez de 21 s)
 ```
+
+El ahorro real es de **8,3 s**, no de 11,5. Propuesta completa y trade-off
+en [`PROPUESTA-MAX-TOKENS.md`](PROPUESTA-MAX-TOKENS.md).
 
 **Lo que cuesta:** si una frase real necesitara más de 180 tokens, se
 truncaría. ¿Puede pasar? 180 tokens son **~720 caracteres**, y una frase de

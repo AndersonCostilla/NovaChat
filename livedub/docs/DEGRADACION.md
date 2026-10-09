@@ -201,3 +201,54 @@ nunca tenía motivo para saltar mientras la frase entera se comía 92 segundos.
 segundo mecanismo que descarta contenido y pediste evaluarlo, no activarlo.
 Mi recomendación es **probarlo en una tanda aparte**, después de la del tope
 de alucinaciones — si enciendes los dos a la vez y mejora, no sabrás cuál fue.
+
+---
+
+## Corrección del 9 de octubre: el control estaba mal elegido
+
+`deriva()` comparaba los tercios de la sesión usando **la duración del audio**
+como control de «mismo trabajo de entrada». Era lo razonable antes de medir.
+
+**`costeWhisper()` demostró que ese control es el equivocado.** El reloj de
+Whisper lo mueven los **caracteres de salida** (9,92 ms cada uno), no los
+segundos de entrada. Dos tercios con frases de la misma duración pueden
+contener textos muy distintos: **frases igual de largas, el triple de texto,
+el triple de tiempo — y ni una pizca de degradación.**
+
+Por eso el «x1,38 sobre el mismo trabajo» de la tanda del 9-oct **no
+significa lo que parece**.
+
+### Qué hace ahora
+
+`deriva()` añade dos columnas:
+
+| columna | qué es |
+|---|---|
+| `caracteres mediana` | el trabajo real de entrada del tercio |
+| `Whisper normalizado` | observado ÷ predicho por el ajuste de la sesión |
+
+**El que manda es `Whisper normalizado`.** Si se mantiene plano mientras el
+bruto sube, no hay degradación: creció el texto. Si sube el normalizado, la
+máquina se está degradando de verdad.
+
+Verificado con cuatro sesiones sintéticas construidas sobre las cifras
+medidas: textos crecientes con máquina estable dan *«x1,35 en bruto, pero x1
+descontando el texto»*; una degradación real de x1,5 sigue saliendo `SÍ`.
+
+### Y los eventos catastróficos
+
+Una sola frase de 18,7 s dentro del último tercio arrastra la mediana. Por eso:
+
+```js
+livedub.deriva()                    // incluye la fila "¿y sin los eventos catastróficos?"
+livedub.deriva({ sinEventos: true }) // los excluye del todo
+```
+
+**Si la deriva desaparece al quitar los eventos, lo que tienes no es
+degradación: es la #22.**
+
+### Límite honesto
+
+Si la sesión no trae recuento de caracteres no se puede normalizar. En ese
+caso el veredicto sale como **«SÍ (con reservas)»** y lo dice: se está usando
+el control peor. No se presenta como seguro algo que no lo es.

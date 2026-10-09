@@ -793,7 +793,10 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
       (i, n) => (i > (2 * n) / 3 ? 20000 : 4000),
       (i, n) => (i > (2 * n) / 3 ? 12 : 3)
     ).deriva();
-    assert.match(d['¿se degrada con el tiempo?'], /^OJO/);
+    // Sin recuento de caracteres no se puede normalizar; el veredicto sale
+    // con reservas en vez de afirmar lo que no se puede saber.
+    assert.match(d['¿se degrada con el tiempo?'], /^(OJO|SÍ \(con reservas\))/);
+    assert.ok(!/xnull/.test(d['¿se degrada con el tiempo?']));
   });
 
   comprobar('el grupo MT más caro llega a la tabla y a la deriva', () => {
@@ -973,6 +976,110 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
   comprobar('devuelve null si no sabe, en vez de un número inventado', () => {
     const c = crearCronometro();
     assert.equal(c.segundosAudioDe(999), null);
+  });
+}
+
+
+/* ------------------------------------------------------------------ */
+/* probarTope() y la deriva normalizada (9-oct-2026)                   */
+/* ------------------------------------------------------------------ */
+{
+  // Coste de Whisper MEDIDO por Anderson: 3243 ms fijos + 9,92 ms/carácter
+  // (R² = 0,646). Todas estas sesiones sintéticas usan esos números.
+  const FIJO = 3243;
+  const POR_CAR = 9.92;
+
+  const sesion = ({ degradacion = 1, carsPorTercio = [230, 230, 230], evento = null, n = 30 }) => {
+    let t = 0;
+    const c = crearCronometro({ ahora: () => t });
+    for (let i = 1; i <= n; i++) {
+      const tercio = i <= n / 3 ? 0 : i <= (2 * n) / 3 ? 1 : 2;
+      let chars = carsPorTercio[tercio] + ((i * 17) % 40) - 20;
+      let sospechosa = false;
+      if (evento === i) {
+        chars = 1555; // la #22: 18.667 ms con el ajuste medido
+        sospechosa = true;
+      }
+      const factor = 1 + (degradacion - 1) * ((i - 1) / (n - 1));
+      t += 1000;
+      c.abrir(i, { tInicioHabla: 0, segundosAudio: 10, motivoCierre: 'silencio' });
+      t += Math.round((FIJO + POR_CAR * chars) * factor);
+      c.marcar(i, 'tFinAsr', { texto: 'x'.repeat(chars), caracteres: chars });
+      if (sospechosa) c.anotarAlucinacion(i, { total: 40, esSospechosa: true });
+      c.cerrar(i, { motivoFinal: 'doblada' });
+    }
+    return c;
+  };
+
+  comprobar('LA PREGUNTA DEL x1,38: textos más largos NO son degradación', () => {
+    // Máquina perfectamente estable, pero el último tercio habla más.
+    // En bruto parece deriva; normalizado por caracteres, no lo es.
+    const d = sesion({ carsPorTercio: [230, 300, 420] }).deriva();
+    assert.match(d['¿se degrada con el tiempo?'], /^NO/);
+    assert.match(d['¿se degrada con el tiempo?'], /creció fue el TEXTO/);
+    assert.ok(d.tramos[2]['caracteres mediana'] > d.tramos[0]['caracteres mediana']);
+    // Y el normalizado se mantiene plano, que es la prueba.
+    assert.ok(Math.abs(d.tramos[0]['Whisper normalizado'] - d.tramos[2]['Whisper normalizado']) < 0.1);
+  });
+
+  comprobar('una degradación DE VERDAD sigue saliendo, con los textos iguales', () => {
+    const d = sesion({ degradacion: 1.5 }).deriva();
+    assert.match(d['¿se degrada con el tiempo?'], /^SÍ/);
+    assert.ok(d.tramos[2]['Whisper normalizado'] > d.tramos[0]['Whisper normalizado'] * 1.2);
+  });
+
+  comprobar('la deriva se vuelve a calcular SIN los eventos catastróficos', () => {
+    const d = sesion({ evento: 22 }).deriva();
+    assert.ok(d['¿y sin los eventos catastróficos?'], 'falta la comparación sin eventos');
+    assert.ok(d['eventos excluidos'].includes(22));
+  });
+
+  comprobar('excluir eventos reduce las frases contadas', () => {
+    const c = sesion({ evento: 22 });
+    assert.ok(/excluidos/.test(String(c.deriva({ sinEventos: true })['frases incluidas'])));
+  });
+
+  console.log('\n  · probarTope(): ¿cortaría habla real?');
+
+  comprobar('180 tokens no toca ninguna frase normal de 12 s', () => {
+    const r = sesion({ evento: 22 }).probarTope(180);
+    assert.match(r['¿es seguro este tope?'], /^SÍ/);
+    assert.equal(r['· de ellas, NO sospechosas (habla real)'], 0);
+    assert.equal(r['se habrían cortado'], 1); // sólo la alucinación
+  });
+
+  comprobar('y avisa del margen que queda sobre la frase real más larga', () => {
+    const r = sesion({ evento: 22 }).probarTope(180);
+    assert.match(r['frase más larga NO sospechosa'], /margen hasta el tope: x2\.\d/);
+  });
+
+  comprobar('un tope DEMASIADO BAJO se delata solo', () => {
+    // 50 tokens = 200 caracteres: por debajo de una frase real de 12 s.
+    const r = sesion({ evento: 22 }).probarTope(50);
+    assert.match(r['¿es seguro este tope?'], /^NO/);
+    assert.ok(r['· de ellas, NO sospechosas (habla real)'] > 0);
+    assert.ok(r.detalle.some((d) => d['¿el detector la vio rara?'].includes('NO')));
+  });
+
+  comprobar('si una frase REAL fuera larguísima, el tope lo diría', () => {
+    // Una frase legítima de 900 caracteres que el detector no marcó.
+    let t = 0;
+    const c = crearCronometro({ ahora: () => t });
+    for (let i = 1; i <= 20; i++) {
+      const chars = i === 10 ? 900 : 230;
+      t += 1000;
+      c.abrir(i, { tInicioHabla: 0, segundosAudio: 10, motivoCierre: 'silencio' });
+      t += Math.round(FIJO + POR_CAR * chars);
+      c.marcar(i, 'tFinAsr', { texto: 'x'.repeat(chars), caracteres: chars });
+      c.cerrar(i, { motivoFinal: 'doblada' });
+    }
+    const r = c.probarTope(180);
+    assert.match(r['¿es seguro este tope?'], /^NO/);
+    assert.equal(r['· de ellas, NO sospechosas (habla real)'], 1);
+  });
+
+  comprobar('lleva el aviso de que una sesión no basta', () => {
+    assert.match(sesion({}).probarTope(180).aviso, /Una sola sesión no basta/);
   });
 }
 

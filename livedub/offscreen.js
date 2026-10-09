@@ -1228,6 +1228,30 @@ globalThis.livedub = {
     return r;
   },
 
+  /**
+   * ¿Un tope de max_new_tokens cortaría alguna frase REAL de esta sesión?
+   * Uso: livedub.probarTope()  ·  livedub.probarTope(120)
+   */
+  probarTope: (tokens = 180) => {
+    const r = cronometro.probarTope(tokens);
+    if (r['¿se puede responder?']) {
+      console.warn(r['¿se puede responder?']);
+      return r;
+    }
+    const { detalle, ...resumen } = r;
+    console.table(resumen);
+    if (detalle.length) {
+      console.log('\nFrases que se habrían cortado:');
+      console.table(detalle);
+    }
+    if (/^NO/.test(r['¿es seguro este tope?'])) {
+      console.error(`[LiveDub] ⚠ ${r['¿es seguro este tope?']} NO apliques este tope.`);
+    } else {
+      console.log(`[LiveDub] ✔ ${r['¿es seguro este tope?']}`);
+    }
+    return r;
+  },
+
   perdidas: () => {
     const r = cronometro.resumenPerdidas();
     if (!r['frases perdidas']) {
