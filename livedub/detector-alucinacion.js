@@ -79,6 +79,47 @@ const RATIO_UNICOS_MINIMO = 0.4;
 // Tres es insistencia humana ("No. No. No."). Cuatro ya no.
 const REPETICIONES_SEGUIDAS_MAXIMAS = 3;
 
+/* --- Contar oraciones no basta: hay que mirar cuánto HABLA sale ---- */
+//
+// 8-oct-2026, noche. La fila #23: **8 trozos** —por debajo del umbral de
+// aviso— y aun así **92 s de voz sobre 12,03 s de audio, ocupación 735 %**.
+//
+// Es el mismo daño que la #57 con una forma distinta: no "muchas oraciones
+// cortas" sino "pocas oraciones larguísimas". Contar trozos nunca iba a
+// cazar eso, porque el número de trozos no es el daño: el daño es EL TIEMPO
+// QUE SE OCUPA EL ALTAVOZ. Así que se mide eso directamente.
+//
+// Ritmo real de la voz del sistema, MEDIDO, no estimado: 17,2 caracteres por
+// segundo (docs/RENDIMIENTO-VOZ.md).
+const CARACTERES_POR_SEGUNDO = 17.2;
+
+// El texto que se analiza está en INGLÉS y lo que se va a hablar es la
+// traducción al español, que dura un 11 % más (proporción ES/EN = 1,11
+// medida). Se aplica ese factor para estimar sobre lo que de verdad sonará.
+const FACTOR_ES_EN = 1.11;
+
+// Cuántas veces puede durar el doblaje lo que duró el audio original.
+//
+// Otra vez dos umbrales, por la misma razón de siempre: avisar es gratis,
+// cortar no.
+//
+//   La proporción ES/EN MEDIDA es 1,11 (mediana de dos tandas: 1,09 y 1,11).
+//   Avisar a partir de 3x es dejar casi el TRIPLE de margen sobre lo medido.
+//   Cortar a partir de 4x deja casi el cuádruple.
+//
+// La #23 iba a 7,6x. La #57, a 8,56x.
+const PROPORCION_AVISO = 3;
+const PROPORCION_CORTE = 4;
+
+// Repetición DENTRO de un mismo trozo.
+//
+// Si Whisper devuelve "It is interesting it is interesting it is interesting…"
+// sin puntuación, segmentador.js entrega UN SOLO trozo gigante y los tres
+// criterios de repetición entre trozos no ven absolutamente nada. Se busca
+// un bloque corto de palabras que se repita seguido dentro del trozo.
+const PALABRAS_BLOQUE_MAXIMO = 8; // bloques de hasta 8 palabras
+const REPETICIONES_INTERNAS_MAXIMAS = 3; // igual que entre trozos
+
 // Proporción máxima que puede ocupar UNA sola oración dentro de la frase.
 //
 // Esto caza la repetición NO SEGUIDA, que los otros dos criterios dejan
@@ -90,6 +131,46 @@ const DOMINANCIA_MAXIMA = 0.5;
 /* ------------------------------------------------------------------ */
 /* Análisis                                                            */
 /* ------------------------------------------------------------------ */
+
+/**
+ * Cuántos segundos de voz saldrían de este texto.
+ * No es una estimación a ojo: 17,2 car/s medidos x 1,11 de inflación ES/EN.
+ */
+export function segundosDeHabla(caracteres) {
+  return (caracteres * FACTOR_ES_EN) / CARACTERES_POR_SEGUNDO;
+}
+
+/**
+ * Busca el bloque de palabras más repetido SEGUIDO dentro de un solo trozo.
+ *
+ * Devuelve {palabras, veces, desde} del bloque más repetido encontrado, o
+ * null. Se prueban bloques de 1 a PALABRAS_BLOQUE_MAXIMO palabras y se queda
+ * con el que más terreno cubre, que es el que de verdad infla la frase.
+ */
+export function repeticionInterna(trozo) {
+  const palabras = normalizar(trozo).split(' ').filter(Boolean);
+  let mejor = null;
+
+  for (let k = 1; k <= Math.min(PALABRAS_BLOQUE_MAXIMO, Math.floor(palabras.length / 2)); k++) {
+    for (let inicio = 0; inicio + k * 2 <= palabras.length; inicio++) {
+      const bloque = palabras.slice(inicio, inicio + k).join(' ');
+      let veces = 1;
+      let i = inicio + k;
+      while (i + k <= palabras.length && palabras.slice(i, i + k).join(' ') === bloque) {
+        veces++;
+        i += k;
+      }
+      if (veces < 2) continue;
+      const cubre = veces * k;
+      if (!mejor || cubre > mejor.cubre || (cubre === mejor.cubre && veces > mejor.veces)) {
+        mejor = { bloque, palabras: k, veces, desde: inicio, cubre };
+      }
+    }
+    // Si ya hemos encontrado algo que cubre casi todo, no hace falta seguir.
+    if (mejor && mejor.cubre >= palabras.length * 0.9) break;
+  }
+  return mejor;
+}
 
 function normalizar(t) {
   return String(t || '')
@@ -122,6 +203,10 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
     repeticionTotalMaxima: total ? 1 : 0,
     dominancia: total ? 1 : 0,
     oracionesPorSegundo: null,
+    caracteres: 0,
+    segundosHablaEstimados: 0,
+    proporcionEstimada: 0,
+    repeticionInterna: null,
     esSospechosa: false,
     superaElTopeDuro: false,
     motivos: []
@@ -155,6 +240,21 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
   }
   const dominancia = repeticionTotalMaxima / total;
 
+  // CUÁNTO HABLA SALE DE AQUÍ. Éste es el criterio que mide el daño real, y
+  // el único que habría cazado la fila #23 (8 trozos, 92 s de voz).
+  const caracteres = lista.join(' ').length;
+  const segundosHablaEstimados = Number(segundosDeHabla(caracteres).toFixed(1));
+  const proporcionEstimada = Number((segundosHablaEstimados / segundos).toFixed(2));
+
+  // Repetición dentro de un mismo trozo: el caso que el troceo no ve.
+  let peorInterna = null;
+  for (const trozo of lista) {
+    const r = repeticionInterna(trozo);
+    if (r && r.veces > REPETICIONES_INTERNAS_MAXIMAS && (!peorInterna || r.veces > peorInterna.veces)) {
+      peorInterna = r;
+    }
+  }
+
   const motivos = [];
   if (total > TROZOS_AVISO) {
     motivos.push(
@@ -169,6 +269,18 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
   }
   if (repeticionSeguidaMaxima > REPETICIONES_SEGUIDAS_MAXIMAS) {
     motivos.push(`la misma oración ${repeticionSeguidaMaxima} veces seguidas.`);
+  }
+  if (proporcionEstimada > PROPORCION_AVISO) {
+    motivos.push(
+      `son unos ${segundosHablaEstimados} s de voz para ${segundos} s de audio ` +
+        `(${proporcionEstimada}x; lo medido con habla real es 1,11x).`
+    );
+  }
+  if (peorInterna) {
+    motivos.push(
+      `dentro de una misma oración, "${peorInterna.bloque}" se repite ` +
+        `${peorInterna.veces} veces seguidas.`
+    );
   }
   if (
     total >= MINIMO_PARA_EVALUAR &&
@@ -191,10 +303,18 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
     repeticionTotalMaxima,
     dominancia: Number(dominancia.toFixed(3)),
     oracionesPorSegundo,
+    caracteres,
+    segundosHablaEstimados,
+    proporcionEstimada,
+    repeticionInterna: peorInterna,
     esSospechosa: motivos.length > 0,
     // ¿Hay además motivo para CORTAR, y no sólo para avisar? Es un umbral
     // aparte y mucho más alto: sanearTrozos() nunca toca nada por debajo.
-    superaElTopeDuro: total > TROZOS_MAXIMOS || repeticionSeguidaMaxima > REPETICIONES_SEGUIDAS_MAXIMAS,
+    superaElTopeDuro:
+      total > TROZOS_MAXIMOS ||
+      repeticionSeguidaMaxima > REPETICIONES_SEGUIDAS_MAXIMAS ||
+      proporcionEstimada > PROPORCION_CORTE ||
+      Boolean(peorInterna),
     motivos
   };
 }
@@ -222,10 +342,17 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
  *   seCorto: boolean
  * }}
  */
-export function sanearTrozos(trozos, { topeDuro = TROZOS_MAXIMOS } = {}) {
+export function sanearTrozos(trozos, { topeDuro = TROZOS_MAXIMOS, segundosAudio = null } = {}) {
   const lista = Array.isArray(trozos) ? trozos.filter((t) => String(t || '').trim()) : [];
   if (lista.length === 0) {
-    return { trozos: [], quitadosPorRepeticion: 0, quitadosPorTope: 0, seCorto: false };
+    return {
+      trozos: [],
+      quitadosPorRepeticion: 0,
+      quitadosPorRepeticionInterna: 0,
+      quitadosPorTope: 0,
+      quitadosPorDuracion: 0,
+      seCorto: false
+    };
   }
 
   // Paso 1: fuera las repeticiones seguidas que pasen de las que un humano
@@ -243,14 +370,56 @@ export function sanearTrozos(trozos, { topeDuro = TROZOS_MAXIMOS } = {}) {
   }
   const quitadosPorRepeticion = lista.length - sinRepetir.length;
 
-  // Paso 2: tope duro.
-  const finales = sinRepetir.slice(0, topeDuro);
-  const quitadosPorTope = sinRepetir.length - finales.length;
+  // Paso 1b: la misma idea, pero DENTRO de cada trozo. "it is interesting"
+  // x20 sin puntuación llega como un solo trozo y el paso 1 no ve nada.
+  // Igual de inocuo: lo que se quita es literalmente idéntico a lo que
+  // queda, y se conservan hasta tres copias.
+  let quitadosPorRepeticionInterna = 0;
+  const sinRepetirDentro = sinRepetir.map((trozo) => {
+    const r = repeticionInterna(trozo);
+    if (!r || r.veces <= REPETICIONES_INTERNAS_MAXIMAS) return trozo;
+    const palabras = String(trozo).split(/\s+/).filter(Boolean);
+    const sobran = (r.veces - REPETICIONES_INTERNAS_MAXIMAS) * r.palabras;
+    quitadosPorRepeticionInterna += sobran;
+    const cortaDesde = r.desde + REPETICIONES_INTERNAS_MAXIMAS * r.palabras;
+    return [...palabras.slice(0, cortaDesde), ...palabras.slice(cortaDesde + sobran)]
+      .join(' ')
+      .trim();
+  }).filter((t) => t);
+
+  // Paso 2: tope duro de oraciones. AQUÍ SÍ SE PUEDE PERDER CONTENIDO REAL.
+  const porTope = sinRepetirDentro.slice(0, topeDuro);
+  const quitadosPorTope = sinRepetirDentro.length - porTope.length;
+
+  // Paso 3: tope duro de DURACIÓN. El que hacía falta para la fila #23:
+  // 8 trozos no superan ningún tope de cantidad, pero 92 s de voz sobre
+  // 12,03 s de audio bloquean el altavoz igual. Se van quitando oraciones
+  // POR EL FINAL —nunca a mitad de palabra— hasta que lo que queda cabe en
+  // PROPORCION_CORTE veces la duración del audio.
+  //
+  // ESTE PASO TAMBIÉN PUEDE PERDER CONTENIDO REAL y por eso se informa
+  // aparte del resto.
+  const finales = [...porTope];
+  let quitadosPorDuracion = 0;
+  if (segundosAudio > 0) {
+    const topeSegundos = segundosAudio * PROPORCION_CORTE;
+    while (
+      finales.length > 1 &&
+      segundosDeHabla(finales.join(' ').length) > topeSegundos
+    ) {
+      finales.pop();
+      quitadosPorDuracion++;
+    }
+  }
 
   return {
     trozos: finales,
     quitadosPorRepeticion,
+    quitadosPorRepeticionInterna,
     quitadosPorTope,
-    seCorto: quitadosPorTope > 0
+    quitadosPorDuracion,
+    // "seCorto" significa: se ha quitado algo que PODRÍA haber sido real.
+    // Desduplicar no cuenta; cortar por tope o por duración, sí.
+    seCorto: quitadosPorTope > 0 || quitadosPorDuracion > 0
   };
 }

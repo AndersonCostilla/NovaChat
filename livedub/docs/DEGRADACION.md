@@ -151,3 +151,53 @@ existe**. Y no es barato:
 
 Si resulta ser térmico o del propio Chrome, lo diré así: **hay un suelo que no
 depende de nosotros**, en vez de inventar una optimización cosmética.
+
+---
+
+## 5. Addendum (8-oct, noche): por qué la cascada no se drena sola
+
+Pediste evaluar un **«vaciado rápido»**: tirar varias frases antiguas de
+golpe en vez de una por una. **Lo he evaluado y la respuesta es que no sirve
+— y conviene ver por qué, porque el motivo señala el arreglo correcto.**
+
+**La cola de voz ya está topada en 2** (`VOZ_SISTEMA.MAX_EN_COLA`) y ya tira
+la **más antigua** en cuanto se pasa. Es decir: **ya se queda siempre con lo
+más reciente**. El goteo de pérdidas de #24 a #34 no es una cola que se
+vacía despacio; es **una cola que no puede avanzar** porque el altavoz lleva
+92 segundos ocupado por una sola frase.
+
+Vaciar más deprisa **descarta más contenido y no devuelve el altavoz ni un
+segundo antes**. Simulado en `tests/test-tope-voz.mjs`: con una locución de
+92 s y una frase nueva cada 6 s, bajar el tope de la cola pierde igual o más;
+acortar la locución a 48 s es lo único que reduce la cascada.
+
+**El cuello de botella es la locución en vuelo, no la profundidad de la cola.**
+
+### Y aquí hay una asimetría que merece la pena subrayar
+
+Tienes toda la razón en que lo del traductor es **un límite arquitectónico**:
+`generate()` no se puede interrumpir y ningún timeout lo va a arreglar — la
+#59 tardó 44.953 ms *con la cancelación ya pedida*. Lo único que se puede
+hacer ahí es **no entrar** en trabajo que no quepa, que es lo del encargo
+anterior.
+
+**Pero la voz no es así.** La frase se trocea a 180 caracteres y entre trozo
+y trozo **sí hay un punto de interrupción real**. Ahí sí se puede parar.
+
+Lo que faltaba es que **el vigilante existente es POR TROZO, no por frase**:
+cada fragmento de 180 caracteres terminaba puntualmente, así que el vigilante
+nunca tenía motivo para saltar mientras la frase entera se comía 92 segundos.
+
+**Mecanismo implementado** (`VOZ_SISTEMA.TOPE_OCUPACION`): un presupuesto
+**por frase**, comprobado entre fragmento y fragmento.
+
+- Tope = **4×** la duración del audio original, nunca menos de **10 s**.
+- **Sólo corta si hay alguien esperando.** Una frase larga que no bloquea a
+  nadie no hace daño a nadie, y cortarla sería perder contenido a cambio de
+  nada.
+- La #23 se habría cortado a los ~48 s en vez de a los 92.
+
+**Arranca APAGADO** (`livedub.toparVozLarga(true)`). No lo enciendo yo: es un
+segundo mecanismo que descarta contenido y pediste evaluarlo, no activarlo.
+Mi recomendación es **probarlo en una tanda aparte**, después de la del tope
+de alucinaciones — si enciendes los dos a la vez y mejora, no sabrás cuál fue.

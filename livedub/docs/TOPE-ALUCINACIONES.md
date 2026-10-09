@@ -1,7 +1,9 @@
 # Tope de alucinaciones — el caso de la frase #57
 
-**8 de octubre de 2026.** Estado: **implementado y APAGADO por defecto.**
-Avisa siempre; recorta sólo si tú lo enciendes.
+**8 de octubre de 2026.** Estado: **ENCENDIDO por defecto desde la noche del
+8-oct**, autorizado por Anderson con dos aciertos en casos reales (#57 y #23)
+y ningún falso positivo. Se apaga con `livedub.toparAlucinaciones(false)`.
+Procedimiento de la tanda de confirmación en `docs/TANDA-CONFIRMACION.md`.
 
 ---
 
@@ -173,3 +175,57 @@ y con razón: no tiene sentido medir un ahorro del 3 % en una sesión en la que
 un fallo se lleva el 47 %. Se retoman cuando una tanda de 5 minutos cumpla
 las dos condiciones que pusiste: **el contador cuadra** y **no hay eventos
 catastróficos**.
+
+
+---
+
+## 8. Segunda revisión (8-oct, noche): la fila #23
+
+**8 trozos** —por debajo de cualquier umbral de cantidad— y **92 s de voz
+para 12,03 s de audio: 735 % de ocupación.** Arrastró once frases.
+
+Esto obligó a reconocer un error de planteamiento en todo lo anterior:
+**contar oraciones nunca iba a bastar, porque el número de oraciones no es el
+daño.** El daño es **el tiempo que se ocupa el altavoz**. La #57 (111 trozos
+cortos) y la #23 (8 trozos larguísimos) son la misma avería con dos formas, y
+sólo se parecen si se mide lo que de verdad importa.
+
+**Criterio nuevo, y ahora el principal: duración estimada del habla.**
+
+```
+segundos de voz = caracteres × 1,11 ÷ 17,2
+                              ^^^^    ^^^^
+              inflación ES/EN medida  car/s medidos (RENDIMIENTO-VOZ.md)
+```
+
+Ninguna de las dos constantes es inventada: las dos están medidas en este
+proyecto. Y otra vez dos umbrales:
+
+| | valor | qué pasa |
+|---|---|---|
+| `PROPORCION_AVISO` | **3×** la duración del audio | se avisa |
+| `PROPORCION_CORTE` | **4×** | se quitan oraciones por el final hasta que cabe |
+
+La proporción medida con habla real es **1,11×** (medianas de dos tandas:
+1,09 y 1,11). Avisar a 3× deja casi el triple de margen; cortar a 4×, casi el
+cuádruple. La #23 iba a **7,6×**; la #57, a **8,56×**.
+
+**Criterio nuevo 2: repetición dentro de un mismo trozo.** Si Whisper
+devuelve `"it is interesting it is interesting it is interesting…"` **sin
+puntuación**, `segmentador.js` entrega **un solo trozo** y los tres criterios
+de repetición entre oraciones no ven absolutamente nada: el ratio de únicos
+es 1 y la repetición seguida es 1. Ahora se busca un bloque corto de palabras
+repetido seguido dentro del trozo, y se conservan tres copias — misma regla y
+misma lógica que entre oraciones.
+
+**Lo que se puede perder, ordenado de menos a más grave:**
+
+| paso del saneado | ¿puede perder algo real? |
+|---|---|
+| repeticiones seguidas entre oraciones | **no** — lo quitado es idéntico a lo que queda |
+| repetición interna de un trozo | **no** — misma razón |
+| tope de cantidad (15 oraciones) | **sí**, y se informa aparte |
+| tope de duración (4× el audio) | **sí**, y se informa aparte |
+
+Los dos últimos marcan la frase como `¿pudo perder algo real? SÍ — revisar`
+en `livedub.cortes()`. Son ésas, y sólo ésas, las que hay que leer a mano.

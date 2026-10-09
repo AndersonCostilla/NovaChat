@@ -122,6 +122,11 @@ export function crearVozSistema({
   const cola = [];
   let siguienteId = 1;
   let idEnVuelo = null;
+
+  // ¿Se puede cortar una frase que lleva demasiado tiempo ocupando el
+  // altavoz? ARRANCA APAGADO: cortar descarta contenido y eso lo decide
+  // Anderson, no yo. Se enciende con livedub.toparVozLarga(true).
+  let topeVozLargaActivo = false;
   let locucionActual = null;
   let vigilante = null;
   let pendiente = null; // { id, resolver, texto, trozos, indice, t0, hablo }
@@ -323,6 +328,36 @@ export function crearVozSistema({
       if (idLocucion !== idEnVuelo) return;
       p.indice += 1;
       if (p.indice < p.trozos.length) {
+        // PRESUPUESTO POR FRASE. Aquí sí hay un punto de interrupción real:
+        // entre trozo y trozo. Es la diferencia con el traductor, donde
+        // generate() no se puede parar de ninguna manera.
+        //
+        // Sólo se corta si HAY ALGUIEN ESPERANDO. Una frase larga que no
+        // bloquea a nadie no hace daño a nadie, y cortarla sería perder
+        // contenido a cambio de nada.
+        const excedido = presupuestoAgotado(p);
+        if (topeVozLargaActivo && excedido && cola.length > 0) {
+          console.warn(
+            `${LOG} frase #${idLocucion} CORTADA: llevaba ${excedido.llevaS} s de voz para ` +
+              `${excedido.origenS} s de audio (${excedido.proporcion}x) y había ${cola.length} ` +
+              `frase(s) esperando. Se dijeron ${p.indice} de ${p.trozos.length} fragmentos.`
+          );
+          p.motivoForzado = 'cortada por ocupar el altavoz demasiado';
+          try {
+            sintesis.cancel();
+          } catch (_) {
+            /* lo que importa es liberar el altavoz */
+          }
+          terminar(idLocucion, { hablado: true, motivo: p.motivoForzado, cortada: true });
+          return;
+        }
+        if (excedido && !topeVozLargaActivo) {
+          console.warn(
+            `${LOG} frase #${idLocucion}: lleva ${excedido.llevaS} s de voz para ` +
+              `${excedido.origenS} s de audio (${excedido.proporcion}x) y hay ${cola.length} ` +
+              'esperando. NO se corta: el tope está apagado (livedub.toparVozLarga(true)).'
+          );
+        }
         armarVigilante();
         decirTrozo();
         return;
@@ -401,6 +436,28 @@ export function crearVozSistema({
       // Si el cancel() no disparó ningún evento, se cierra aquí.
       terminar(id, { hablado: p.hablo, motivo: 'sin evento end (vigilante)' });
     }, plazo);
+  }
+
+  /**
+   * ¿Esta frase lleva ocupando el altavoz más de lo razonable?
+   *
+   * Razonable = TOPE_OCUPACION veces lo que duró el audio original, nunca
+   * menos que TOPE_OCUPACION_MINIMO_MS. Devuelve null si no se ha pasado, o
+   * los números para poder explicarlo si sí.
+   */
+  function presupuestoAgotado(p) {
+    if (!p?.t0 || !p.segundosOrigen) return null;
+    const llevaMs = Date.now() - p.t0;
+    const topeMs = Math.max(
+      VOZ_SISTEMA.TOPE_OCUPACION_MINIMO_MS,
+      p.segundosOrigen * 1000 * VOZ_SISTEMA.TOPE_OCUPACION
+    );
+    if (llevaMs <= topeMs) return null;
+    return {
+      llevaS: Number((llevaMs / 1000).toFixed(1)),
+      origenS: Number(p.segundosOrigen.toFixed(2)),
+      proporcion: Number((llevaMs / 1000 / p.segundosOrigen).toFixed(2))
+    };
   }
 
   function pararVigilante() {
@@ -509,6 +566,12 @@ export function crearVozSistema({
     obtenerEstado: () => estado,
     vozActual: () => voz?.nombre ?? null,
     estaHablando: () => idEnVuelo !== null,
+    /** Interruptor del tope de ocupación del altavoz. Por defecto apagado. */
+    fijarTopeVozLarga: (encendido) => {
+      topeVozLargaActivo = Boolean(encendido);
+      return topeVozLargaActivo;
+    },
+    topeVozLargaActivo: () => topeVozLargaActivo,
     enCola: () => cola.length
   };
 }

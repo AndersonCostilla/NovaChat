@@ -13,7 +13,9 @@ import {
   analizarTrozos,
   sanearTrozos,
   TROZOS_MAXIMOS,
-  TROZOS_AVISO
+  TROZOS_AVISO,
+  segundosDeHabla,
+  repeticionInterna
 } from '../detector-alucinacion.js';
 
 let hechas = 0;
@@ -36,7 +38,7 @@ comprobar('la #57 exacta: 111 x "Es interesante." sobre 12,03 s', () => {
   assert.equal(a.unicos, 1);
   assert.equal(a.repeticionSeguidaMaxima, 111);
   assert.equal(a.oracionesPorSegundo, 9.23);
-  assert.equal(a.motivos.length, 3); // los tres criterios la señalan
+  assert.equal(a.motivos.length, 4); // densidad, pocos únicos, repetición y duración
 
   const s = sanearTrozos(trozos);
   assert.equal(s.trozos.length, 3);
@@ -76,7 +78,11 @@ comprobar('habla normal: ni sospecha ni cambia nada', () => {
     'The thing about this is that it works really well in practice.',
     'Yes. Okay. Right. Sure. Got it. Fine. Yeah.',
     'Se siente muy bien y de manera similar.',
-    Array(60).fill('word').join(' ') // 12 s sin puntuación
+    // 12 s de habla seguida sin ningún punto. (La versión anterior de este
+    // caso era "word" x60, y el detector la marcó: con razón, porque eso ES
+    // una repetición. Una muestra degenerada no sirve de control.)
+    'so what we are looking at here is a situation where the speaker simply ' +
+      'does not pause for breath and keeps going without any punctuation at all'
   ];
   for (const texto of reales) {
     const trozos = trocear(texto);
@@ -149,6 +155,89 @@ comprobar('la repetición NO SEGUIDA también se caza ahora', () => {
   );
   assert.equal(conDominancia.esSospechosa, true);
   assert.ok(conDominancia.motivos.some((m) => m.includes('aunque no seguidas')));
+});
+
+console.log('\n── LA FILA #23: pocos trozos, muchísimo habla ──');
+
+// 8 trozos (por debajo del umbral de conteo) y 92 s de voz sobre 12,03 s de
+// audio: 735 % de ocupación. Contar oraciones nunca iba a cazar esto, porque
+// el número de oraciones no es el daño. El daño es el tiempo de altavoz.
+const COMO_LA_23 = Array.from(
+  { length: 8 },
+  (_, i) =>
+    `Sentence ${i} and then something else happened in the story which went ` +
+    'on and on for a very long while indeed without ever stopping at any point.'
+);
+
+comprobar('8 trozos no pasan ningún tope de cantidad', () => {
+  assert.equal(COMO_LA_23.length, 8);
+  assert.ok(COMO_LA_23.length <= TROZOS_AVISO);
+  assert.ok(COMO_LA_23.length <= TROZOS_MAXIMOS);
+});
+
+comprobar('y aun así se caza, por la duración del habla que genera', () => {
+  const a = analizarTrozos(COMO_LA_23, { segundosAudio: 12.03 });
+  assert.equal(a.esSospechosa, true);
+  assert.ok(a.proporcionEstimada > 4, `${a.proporcionEstimada}x`);
+  assert.equal(a.ratioUnicos, 1); // ninguna repetición: sólo volumen
+  assert.equal(a.repeticionSeguidaMaxima, 1);
+  assert.ok(a.motivos.some((m) => m.includes('de voz para')));
+});
+
+comprobar('y se recorta hasta que cabe en 4x el audio', () => {
+  const s = sanearTrozos(COMO_LA_23, { segundosAudio: 12.03 });
+  assert.ok(s.quitadosPorDuracion > 0);
+  assert.equal(s.seCorto, true); // puede haberse perdido algo real: se avisa
+  assert.ok(segundosDeHabla(s.trozos.join(' ').length) <= 12.03 * 4);
+  assert.ok(s.trozos.length > 0); // nunca lo deja vacío
+});
+
+comprobar('la estimación de habla usa los 17,2 car/s MEDIDOS', () => {
+  // 172 caracteres = 10 s a ritmo medido, x1,11 de inflación ES/EN.
+  assert.ok(Math.abs(segundosDeHabla(172) - 11.1) < 0.05);
+});
+
+comprobar('una frase real de 12 s no se acerca ni de lejos al umbral', () => {
+  // Ritmo real: proporción ES/EN 1,11 → unos 230 caracteres en 12,03 s.
+  const real = ['This is what a normal twelve second sentence actually looks like when ' +
+    'somebody is speaking at a comfortable pace in a documentary or a talk.'];
+  const a = analizarTrozos(real, { segundosAudio: 12.03 });
+  assert.equal(a.esSospechosa, false);
+  assert.ok(a.proporcionEstimada < 2, `${a.proporcionEstimada}x`);
+});
+
+console.log('\n── Repetición DENTRO de un mismo trozo ──');
+
+comprobar('"it is interesting" x12 sin puntuación: un solo trozo, y se caza', () => {
+  // segmentador.js entregaría esto como UN trozo. Los tres criterios de
+  // repetición entre oraciones no ven absolutamente nada.
+  const unico = [Array(12).fill('it is interesting').join(' ') + '.'];
+  const a = analizarTrozos(unico, { segundosAudio: 12.03 });
+  assert.equal(a.total, 1);
+  assert.equal(a.ratioUnicos, 1);
+  assert.equal(a.repeticionSeguidaMaxima, 1);
+  assert.equal(a.esSospechosa, true);
+  assert.equal(a.repeticionInterna.veces, 12);
+  assert.ok(a.motivos.some((m) => m.includes('dentro de una misma oración')));
+});
+
+comprobar('al sanearlo quedan tres copias, no una ni doce', () => {
+  const unico = [Array(12).fill('it is interesting').join(' ') + '.'];
+  const s = sanearTrozos(unico, { segundosAudio: 12.03 });
+  const veces = (s.trozos.join(' ').match(/it is interesting/g) || []).length;
+  assert.equal(veces, 3);
+  assert.ok(s.quitadosPorRepeticionInterna > 0);
+});
+
+comprobar('el habla real no tiene repetición interna', () => {
+  for (const t of [
+    'This is a perfectly normal English sentence with no repetition at all.',
+    'We went to the shop and then we went home.',
+    'No, no, no, I will not do that.'
+  ]) {
+    const r = repeticionInterna(t);
+    assert.ok(!r || r.veces <= 3, `${t} → ${JSON.stringify(r)}`);
+  }
 });
 
 console.log('\n── Los dos números están justificados, no elegidos ──');

@@ -21,7 +21,7 @@
 // El analyser cuelga de la FUENTE, no de gainOriginal: así el medidor seguirá
 // mostrando el nivel real aunque el ducking baje gainOriginal.
 
-import { MSG, TARGET, ESTADO_MODELO_UI, MODULO, MOTOR_VOZ } from './messages.js';
+import { MSG, TARGET, ESTADO_MODELO_UI, MODULO, MOTOR_VOZ, VOZ_SISTEMA } from './messages.js';
 import { crearTranscriptor } from './transcriptor.js';
 import { crearTraductor } from './traductor.js';
 import { crearMotorVoz } from './motor-voz.js';
@@ -46,11 +46,18 @@ let recorteActivo = false;
 let recorteObjetivo = OBJETIVO_POR_DEFECTO;
 
 /* ---------------- Tope de alucinaciones (la #57) ------------------ */
-// ARRANCA APAGADO. El diagnóstico se imprime SIEMPRE —eso no cambia nada y
-// no cuesta nada—, pero recortar la frase descarta contenido, y eso no se
-// activa sin que Anderson lo diga. Se enciende con
-// livedub.toparAlucinaciones(true).
-let toparAlucinacionesActivo = false;
+//
+// ENCENDIDO POR DEFECTO desde el 8-oct-2026 por la noche, autorizado por
+// Anderson con esta evidencia: el detector acertó en dos casos reales (la
+// #57, "Es interesante." x111, y la #23, 8 trozos y 92 s de voz) y no marcó
+// ninguna frase legítima. Se apaga con livedub.toparAlucinaciones(false).
+let toparAlucinacionesActivo = true;
+
+// Registro de lo que el tope ha recortado, para poder revisarlo A MANO
+// después de una tanda. Sin esto, "cortó 6 veces" es un número en el que no
+// hay ninguna razón para confiar: hay que poder leer los textos.
+const cortes = [];
+const MAX_CORTES_GUARDADOS = 50;
 
 /* ---------------------- Constantes del VAD ------------------------ */
 // Ajustables: dependen del material de audio.
@@ -579,9 +586,27 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
     );
 
     if (toparAlucinacionesActivo) {
-      const saneado = sanearTrozos(trozosOriginales);
+      const saneado = sanearTrozos(trozosOriginales, { segundosAudio: duracionMs / 1000 });
       const quitados = trozosOriginales.length - saneado.trozos.length;
+      const antes = texto;
       texto = saneado.trozos.join(' ');
+
+      // Se guarda el ANTES y el DESPUÉS enteros para poder comprobar a mano
+      // que lo descartado era alucinación y no habla.
+      cortes.push({
+        '#': id,
+        'audio (s)': Number((duracionMs / 1000).toFixed(2)),
+        motivos: diagnostico.motivos.join(' '),
+        'voz estimada antes (s)': diagnostico.segundosHablaEstimados,
+        'voz estimada después (s)': Number(
+          ((texto.length * 1.11) / 17.2).toFixed(1)
+        ),
+        'oraciones': `${trozosOriginales.length} → ${saneado.trozos.length}`,
+        '¿pudo perder algo real?': saneado.seCorto ? 'SÍ — revisar' : 'no (sólo repeticiones)',
+        ANTES: antes,
+        DESPUES: texto
+      });
+      while (cortes.length > MAX_CORTES_GUARDADOS) cortes.shift();
       registrarPerdida({
         id,
         // Lo descartado es, casi con seguridad, texto que nunca se dijo. Se
@@ -591,7 +616,10 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
         etapa: saneado.seCorto ? 'alucinación (cortada por tope)' : 'alucinación (repeticiones)',
         detalle:
           `${quitados} de ${trozosOriginales.length} oraciones descartadas ` +
-          `(${saneado.quitadosPorRepeticion} por repetición, ${saneado.quitadosPorTope} por tope).`,
+          `(${saneado.quitadosPorRepeticion} por repetición entre oraciones, ` +
+          `${saneado.quitadosPorRepeticionInterna} palabras por repetición interna, ` +
+          `${saneado.quitadosPorTope} por tope de cantidad, ` +
+          `${saneado.quitadosPorDuracion} por tope de duración).`,
         cerrarFrase: false
       });
     }
@@ -1189,6 +1217,51 @@ globalThis.livedub = {
       `[LiveDub] tope de alucinaciones ${toparAlucinacionesActivo ? 'ENCENDIDO' : 'APAGADO'}.`
     );
     return toparAlucinacionesActivo;
+  },
+
+  /**
+   * Los textos que el tope de alucinaciones ha recortado, con el antes y el
+   * después enteros. Para revisarlos A MANO, que es la única forma de saber
+   * si eran alucinaciones de verdad. Uso: livedub.cortes()
+   */
+  cortes: () => {
+    if (!cortes.length) {
+      console.log('[LiveDub] el tope de alucinaciones no ha cortado nada en esta sesión.');
+      return [];
+    }
+    console.table(
+      cortes.map(({ ANTES, DESPUES, ...resto }) => resto)
+    );
+    console.log(
+      `[LiveDub] ${cortes.length} corte(s). Los textos completos van en el array devuelto ` +
+        '(campos ANTES y DESPUES). Revisa 3-5 a mano antes de fiarte del número.'
+    );
+    return cortes;
+  },
+
+  /**
+   * Tope de ocupación del altavoz: corta una frase que lleva demasiado
+   * tiempo hablando SI hay otras esperando. Por defecto apagado.
+   * Uso: livedub.toparVozLarga(true)
+   */
+  toparVozLarga: (encendido) => {
+    const vozSistema = motorVoz?.vozSistema();
+    if (!vozSistema?.fijarTopeVozLarga) {
+      console.warn('[LiveDub] la voz del sistema no está iniciada.');
+      return null;
+    }
+    if (encendido === undefined) {
+      return {
+        activo: vozSistema.topeVozLargaActivo(),
+        'se corta a partir de': `${VOZ_SISTEMA.TOPE_OCUPACION}x la duración del audio`,
+        'nunca antes de': `${VOZ_SISTEMA.TOPE_OCUPACION_MINIMO_MS / 1000} s`,
+        'sólo si hay alguien esperando': true,
+        'cómo encenderlo': 'livedub.toparVozLarga(true)'
+      };
+    }
+    const activo = vozSistema.fijarTopeVozLarga(encendido);
+    console.log(`[LiveDub] tope de voz larga ${activo ? 'ENCENDIDO' : 'APAGADO'}.`);
+    return activo;
   },
 
   /* ---------------- Recorte de traducciones (opción A) -------------- */

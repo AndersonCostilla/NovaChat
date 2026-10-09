@@ -228,6 +228,21 @@ export const VOZ_SISTEMA = {
   // la voz iría tan por detrás que ya no acompañaría a la escena.
   MAX_EN_COLA: 2,
 
+  // TOPE DE OCUPACIÓN DEL ALTAVOZ (8-oct-2026, noche).
+  //
+  // La fila #23 ocupó el altavoz 92 s para 12,03 s de audio (735 %) y arrastró
+  // once frases. El vigilante no la paró porque el vigilante es POR TROZO: la
+  // frase se trocea a 180 caracteres y cada trozo terminaba puntualmente. Lo
+  // que faltaba era un presupuesto POR FRASE.
+  //
+  // Cuántas veces puede durar el doblaje lo que duró el audio original. La
+  // proporción medida con habla real es 1,11; se deja en 4 para que esto no
+  // pueda tocar una frase legítima ni de lejos.
+  TOPE_OCUPACION: 4,
+
+  // Suelo, para que una frase corta no se corte por un número ridículo.
+  TOPE_OCUPACION_MINIMO_MS: 10000,
+
   // Vigilante por si `end` no llega nunca. Plazo = duración estimada ×
   // FACTOR + MARGEN, nunca menos que el mínimo.
   VIGILANTE_FACTOR: 2.5,
