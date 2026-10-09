@@ -96,7 +96,30 @@ async function transcribir({ id, audio, idioma }) {
   const opciones = {
     chunk_length_s: 30, // Whisper trabaja en ventanas de 30 s
     return_timestamps: false,
-    task: 'transcribe' // NUNCA 'translate': la traducción es de otra fase
+    task: 'transcribe', // NUNCA 'translate': la traducción es de otra fase
+    // TECHO AL DECODER. Autorizado el 9-oct-2026 tras TRES tandas.
+    //
+    // Sin esto, cuando Whisper alucina no para hasta chocar con su límite
+    // duro de 448 posiciones: la frase #10 devolvió 1.889 caracteres y se
+    // comió 20.051 ms, y ese gasto desbordaba la cola siguiente y se
+    // llevaba por delante frases legítimas. Medido en el equipo de
+    // Anderson: 3.243 ms fijos + 9,92 ms por carácter. 180 tokens ≈ 720
+    // caracteres ≈ 10,4 ms de techo, frente a los ~21 s de antes.
+    //
+    // ¿Por qué 180 y no menos? Porque el habla real no se acerca: en tres
+    // tandas (1, 58 y 75 frases) la frase legítima más larga dejó un margen
+    // de x3,3 hasta el tope, y las únicas frases que el tope habría tocado
+    // eran alucinaciones confirmadas A MANO una por una.
+    //
+    // LO QUE ESTO **NO** ARREGLA: la frase #11 tardó 20.392 ms con sólo 35
+    // caracteres, justo después de la #10. Eso no es generación excesiva,
+    // es otra cosa —contención entre llamadas vecinas— y el tope no la
+    // toca. Ver docs/CONTENCION-WHISPER.md.
+    //
+    // El compañero de este número vive en offscreen.js (TOPE_TOKENS_ASR) y
+    // sirve para avisar si alguna transcripción sale cortada a medias.
+    // Si se cambia uno, hay que cambiar el otro.
+    max_new_tokens: 180
   };
   if (idioma && idioma !== 'auto') opciones.language = idioma;
 

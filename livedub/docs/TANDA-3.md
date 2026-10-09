@@ -97,3 +97,64 @@ livedub.truncadas()
 `truncadas()` es el que de verdad importa esa vez: dice si el tope cortó
 alguna frase a mitad de palabra. **Si aparece una sola que no fuera
 alucinación, el tope se revierte.**
+
+---
+
+# Resultado de la tanda 3, y la tanda 4 (post-tope)
+
+**Tanda 3 ejecutada el 9-oct-2026: 75 frases, margen x3,3, una sola frase
+tocada y era la alucinación ya confirmada. El tope se aplicó.**
+
+La tanda 4 es la **validación del tope ya aplicado**. Cambiar el
+transcriptor invalida lo validado antes, así que se repite entera.
+
+```
+cd /c/Users/Janus/Desktop/NovaChat
+git pull origin arena/5e149d9c-novachat
+```
+
+Recarga la extensión. Graba una tanda normal y al terminar, en este orden:
+
+```
+livedub.cortes()
+```
+```
+livedub.truncadas()
+```
+```
+livedub.informeTanda()
+```
+```
+livedub.probarTope(180)
+```
+```
+livedub.costeWhisper()
+```
+```
+livedub.deriva()
+```
+```
+livedub.contencion()
+```
+
+## El comando nuevo que importa: `truncadas()`
+
+Es el que vigila el riesgo del tope: frases que llegaron **al borde de los
+720 caracteres y no terminan en signo de cierre**. **Si aparece una sola que
+no fuera alucinación, el tope se revierte** — son dos líneas.
+
+## Con qué expectativa leerlo
+
+**Se espera que desaparezcan los eventos de Whisper con texto masivo
+detrás** (tipo #10). **No se espera que desaparezcan todos los eventos
+≥16 s**: los del tipo #11 —frase corta ralentizada por una vecina pesada— el
+tope no los toca. Si quedan algunos de ésos, el arreglo funciona igual.
+Razonado en [`CONTENCION-WHISPER.md`](CONTENCION-WHISPER.md).
+
+Lo que sí es señal de que ha funcionado:
+
+- `costeWhisper()` → **el R² debería subir** respecto al 0,333 de la tanda 3,
+  porque desaparece el punto extremo de los 1.889 caracteres.
+- `informeTanda()` → menos pérdidas en cascada tras los eventos.
+- `contencion()` → si los residuos de las frases vecinas bajan solos, parte
+  del problema era la memoria que dejaba la alucinación larga.

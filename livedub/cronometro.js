@@ -1030,6 +1030,106 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    * suponerlo. Sin tocar el transcriptor y sin instrumentar nada nuevo: los
    * dos datos ya estaban en la tabla.
    */
+  /**
+   * ¿Se estorban entre sí dos llamadas a Whisper cercanas en el tiempo?
+   *
+   * LA PREGUNTA DE LA #11. En la tanda del 9-oct-2026 la frase #10 alucinó
+   * 1.889 caracteres y tardó 20.051 ms —eso lo explica el texto— pero la
+   * #11, con 35 CARACTERES, tardó 20.392 ms. El texto no explica eso. Y
+   * ocurrió justo después. El R² de la sesión se hundió a 0,333 por culpa
+   * de ese punto.
+   *
+   * La hipótesis: una llamada pesada deja la máquina tocada —hilo ocupado,
+   * memoria, recolección de basura— y la siguiente paga parte de la factura.
+   *
+   * Esto NO la demuestra. Lo que hace es poner el dato donde se pueda mirar:
+   * para cada frase calcula cuánto se desvía de lo que predice el tamaño de
+   * su texto (el RESIDUO) y lo cruza con si venía pegada a una vecina
+   * pesada. Si la hipótesis es cierta, las frases que siguen a una vecina
+   * pesada deben tener residuos mucho mayores que las demás.
+   *
+   * Con una sola sesión esto es un indicio, no una conclusión.
+   */
+  function contencion({ msVecindad = 2000, msPesada = 12000 } = {}) {
+    const ajuste = costeWhisper();
+    if (ajuste['¿se puede responder?']) return ajuste;
+
+    const fijo = ajuste['coste FIJO del encoder (ms)'];
+    const porCaracter = ajuste['coste por carácter del decoder (ms)'];
+
+    const frases = historial
+      .filter((f) => f.tFinAsr !== null && f.tFinHabla !== null && typeof f.caracteres === 'number')
+      .sort((a, b) => a.tFinAsr - b.tFinAsr);
+
+    const filas = frases.map((f, i) => {
+      const asrMs = f.tFinAsr - f.tFinHabla;
+      const esperado = fijo + porCaracter * f.caracteres;
+      const anterior = i > 0 ? frases[i - 1] : null;
+      const anteriorMs = anterior ? anterior.tFinAsr - anterior.tFinHabla : null;
+      // Hueco entre que la anterior soltó su resultado y ésta empezó. Si es
+      // negativo o diminuto, las dos estuvieron vivas casi a la vez.
+      const hueco = anterior ? f.tFinHabla - anterior.tFinAsr : null;
+      return {
+        '#': f.id,
+        caracteres: f.caracteres,
+        'Whisper (ms)': Math.round(asrMs),
+        'esperado por su texto (ms)': Math.round(esperado),
+        'de más (ms)': Math.round(asrMs - esperado),
+        'vecina anterior': anterior ? `#${anterior.id} (${Math.round(anteriorMs)} ms)` : '—',
+        'hueco con la anterior (ms)': hueco === null ? null : Math.round(hueco),
+        'detrás de una pesada':
+          anterior !== null && anteriorMs >= msPesada && hueco !== null && hueco <= msVecindad
+      };
+    });
+
+    const detras = filas.filter((r) => r['detrás de una pesada']);
+    const sueltas = filas.filter((r) => !r['detrás de una pesada'] && r['vecina anterior'] !== '—');
+    const med = (xs) => mediana(xs.map((r) => r['de más (ms)']));
+    const medDetras = med(detras);
+    const medSueltas = med(sueltas);
+
+    let veredicto;
+    if (!detras.length) {
+      veredicto =
+        'NO SE PUEDE DECIR — en esta sesión ninguna frase vino pegada a una vecina pesada. ' +
+        'Sin casos no hay nada que comparar.';
+    } else if (detras.length < 3) {
+      veredicto =
+        `INDICIO DÉBIL — sólo ${detras.length} caso(s). ` +
+        `Se desvían ${medDetras} ms frente a ${medSueltas} ms las demás, pero con ` +
+        'tan pocos casos eso puede ser casualidad. Hacen falta más tandas.';
+    } else if (medSueltas !== null && medDetras > medSueltas * 2 && medDetras > 3000) {
+      veredicto =
+        `SÍ, HAY INDICIO — las frases pegadas a una vecina pesada tardan ${medDetras} ms ` +
+        `más de lo que su texto justifica, frente a ${medSueltas} ms las demás. ` +
+        'La contención entre llamadas vecinas es una explicación compatible con esto.';
+    } else {
+      veredicto =
+        `NO — venir detrás de una vecina pesada no cambia gran cosa ` +
+        `(${medDetras} ms de desvío frente a ${medSueltas} ms). ` +
+        'La lentitud de esas frases habrá que buscarla en otro sitio.';
+    }
+
+    return {
+      'frases analizadas': filas.length,
+      'frases pegadas a una vecina pesada': detras.length,
+      'se desvían de su texto (mediana)': medDetras === null ? null : `${medDetras} ms`,
+      'las demás se desvían (mediana)': medSueltas === null ? null : `${medSueltas} ms`,
+      '¿hay contención?': veredicto,
+      'criterios usados':
+        `vecina pesada = ${msPesada} ms o más de Whisper · ` +
+        `pegada = menos de ${msVecindad} ms de hueco`,
+      'las 5 más inexplicables': [...filas]
+        .sort((a, b) => b['de más (ms)'] - a['de más (ms)'])
+        .slice(0, 5),
+      detalle: filas,
+      aviso:
+        'Esto mide una CORRELACIÓN dentro de una sesión. No prueba la causa: ' +
+        'un tramo en que la máquina va lenta produce vecinas pesadas Y frases ' +
+        'lentas a la vez, sin que una cause la otra.'
+    };
+  }
+
   function costeWhisper() {
     const puntos = historial
       .filter((f) => f.tFinAsr !== null && f.tFinHabla !== null && typeof f.caracteres === 'number')
@@ -1240,6 +1340,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     anotarGrupos,
     costeWhisper,
     probarTope,
+    contencion,
     anotarTruncada,
     truncadas,
     segundosAudioDe,

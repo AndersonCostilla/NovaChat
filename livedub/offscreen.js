@@ -55,12 +55,14 @@ let toparAlucinacionesActivo = true;
 
 // TOPE DE GENERACIÓN DE WHISPER (max_new_tokens).
 //
-// null = NO HAY TOPE. Hoy, 9-oct-2026, el transcriptor sigue sin límite y
-// este número sólo sirve para que el aviso de truncamiento sepa contra qué
-// comparar. En cuanto se aplique el tope en transcriptor-worker.js hay que
-// poner aquí EL MISMO número, o el aviso medirá contra un borde que no
-// existe. Ver docs/PROPUESTA-MAX-TOKENS.md.
-const TOPE_TOKENS_ASR = null;
+// DEBE SER EL MISMO NÚMERO que `max_new_tokens` en transcriptor-worker.js.
+// Aquí no impone nada: sirve para que el aviso de truncamiento sepa contra
+// qué borde comparar. Si se cambia allí y no aquí, `livedub.truncadas()`
+// mide contra un borde que no existe y deja de avisar.
+//
+// Activado el 9-oct-2026 tras tres tandas de probarTope(180) sin tocar
+// habla real. Ver docs/PROPUESTA-MAX-TOKENS.md y docs/EVIDENCIA-TOPE.md.
+const TOPE_TOKENS_ASR = 180;
 
 // Registro de lo que el tope ha recortado, para poder revisarlo A MANO
 // después de una tanda. Sin esto, "cortó 6 veces" es un número en el que no
@@ -1254,6 +1256,24 @@ globalThis.livedub = {
       console.table(detalle);
       console.error('[LiveDub] Hay frases posiblemente truncadas por el tope.');
     }
+    return r;
+  },
+
+  /**
+   * ¿Se estorban entre sí dos llamadas a Whisper cercanas en el tiempo?
+   * La pregunta que el tope de tokens NO responde.
+   * Uso: livedub.contencion()
+   */
+  contencion: (opciones) => {
+    const r = cronometro.contencion(opciones);
+    if (r['¿se puede responder?']) {
+      console.warn(r['¿se puede responder?']);
+      return r;
+    }
+    const { detalle, 'las 5 más inexplicables': peores, ...resumen } = r;
+    console.table(resumen);
+    console.log('\nLas 5 frases que más se desvían de lo que su texto justifica:');
+    console.table(peores);
     return r;
   },
 

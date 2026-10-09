@@ -1,8 +1,21 @@
 # Propuesta: `max_new_tokens` en Whisper
 
-**9 de octubre de 2026.** Estado: **PROPUESTA. No aplicada.**
+**9 de octubre de 2026.** Estado: **APLICADO** tras tres tandas.
 
-> ### Dónde está esto ahora
+> ### APLICADO el 9-oct-2026
+>
+> Tres tandas (1, 58 y **75** frases, la última con otro vídeo) con
+> `probarTope(180)` limpio y **margen x3,3** sobre el habla real más larga.
+> Autorizado por Anderson. En el código: `max_new_tokens: 180` y
+> `TOPE_TOKENS_ASR = 180`.
+>
+> **Arregla una causa de dos.** La otra —frases cortas ralentizadas por una
+> vecina pesada, tipo #11— sigue abierta en
+> [`CONTENCION-WHISPER.md`](CONTENCION-WHISPER.md). **No esperes que
+> desaparezcan todos los eventos de Whisper ≥16 s**, sólo los que vienen con
+> texto masivo detrás.
+>
+> ### Cómo se llegó hasta aquí
 >
 > **Dos tandas confirmadas sin falsos positivos** (1 frase y 58 frases): las
 > únicas frases que el tope habría tocado —#22, #29, #33— son alucinaciones

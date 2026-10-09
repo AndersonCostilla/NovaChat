@@ -1134,6 +1134,84 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
   });
 }
 
+{
+  // LA PREGUNTA DE LA #11: 35 caracteres, 20.392 ms, justo detrás de una
+  // alucinación de 20.051 ms. El tope de tokens no toca esto.
+  console.log('\nCONTENCIÓN ENTRE LLAMADAS DE WHISPER (contencion)\n');
+
+  const FIJO = 3243;
+  const POR_CAR = 9.92;
+
+  // Construye una sesión donde cada frase declara cuánto texto produjo y
+  // cuánto tardó Whisper, y con cuánto hueco empezó tras la anterior.
+  const sesionAsr = (frases) => {
+    let t = 0;
+    const c = crearCronometro({ ahora: () => t });
+    c.activar(true);
+    frases.forEach((f, i) => {
+      t += f.hueco ?? 5000;
+      const tInicio = t;
+      c.abrir(i + 1, { tInicioHabla: tInicio, segundosAudio: 10, motivoCierre: 'silencio' });
+      t = tInicio; // tFinHabla = inicio del trabajo de Whisper
+      c.marcar(i + 1, 'tFinHabla');
+      t = tInicio + f.ms;
+      c.marcar(i + 1, 'tFinAsr', { texto: 'x'.repeat(f.car), caracteres: f.car });
+      c.cerrar(i + 1, { motivoFinal: 'doblada' });
+    });
+    return c;
+  };
+
+  const normal = (car) => ({ car, ms: Math.round(FIJO + POR_CAR * car), hueco: 5000 });
+
+  comprobar('sin vecinas pesadas lo dice en vez de inventarse un veredicto', () => {
+    const c = sesionAsr(Array.from({ length: 12 }, (_, i) => normal(100 + i * 10)));
+    const r = c.contencion();
+    assert.equal(r['frases pegadas a una vecina pesada'], 0);
+    assert.match(r['¿hay contención?'], /NO SE PUEDE DECIR/);
+  });
+
+  comprobar('reproduce el par #10-#11: frase corta y lenta pegada a una pesada', () => {
+    const frases = Array.from({ length: 10 }, (_, i) => normal(80 + i * 15));
+    // La pesada (alucinación larga) y, pegadas a ella, tres frases cortas
+    // que tardan muchísimo más de lo que su texto justifica.
+    frases.push({ car: 1889, ms: 20051, hueco: 5000 });
+    frases.push({ car: 35, ms: 20392, hueco: 300 });
+    frases.push({ car: 40, ms: 18000, hueco: 300 });
+    frases.push({ car: 50, ms: 17000, hueco: 300 });
+    const r = sesionAsr(frases).contencion();
+    assert.ok(r['frases pegadas a una vecina pesada'] >= 3);
+    assert.match(r['¿hay contención?'], /SÍ, HAY INDICIO/);
+  });
+
+  comprobar('con un solo caso el indicio se declara DÉBIL, no concluyente', () => {
+    const frases = Array.from({ length: 10 }, (_, i) => normal(80 + i * 15));
+    frases.push({ car: 1889, ms: 20051, hueco: 5000 });
+    frases.push({ car: 35, ms: 20392, hueco: 300 });
+    const r = sesionAsr(frases).contencion();
+    assert.equal(r['frases pegadas a una vecina pesada'], 1);
+    assert.match(r['¿hay contención?'], /INDICIO DÉBIL/);
+  });
+
+  comprobar('frases pegadas a una pesada pero RÁPIDAS: no inventa contención', () => {
+    const frases = Array.from({ length: 10 }, (_, i) => normal(80 + i * 15));
+    // Tres pesadas, cada una seguida de una frase corta que va a su ritmo.
+    // Sólo cuenta la vecina INMEDIATAMENTE anterior, así que hay que
+    // intercalarlas para tener tres casos de verdad.
+    for (const car of [1889, 1700, 1500]) {
+      frases.push({ car, ms: Math.round(FIJO + POR_CAR * car), hueco: 5000 });
+      frases.push({ ...normal(40), hueco: 300 });
+    }
+    const r = sesionAsr(frases).contencion();
+    assert.equal(r['frases pegadas a una vecina pesada'], 3);
+    assert.match(r['¿hay contención?'], /^NO —/);
+  });
+
+  comprobar('advierte de que es correlación, no causa', () => {
+    const c = sesionAsr(Array.from({ length: 12 }, (_, i) => normal(100 + i * 10)));
+    assert.match(c.contencion().aviso, /No prueba la causa/);
+  });
+}
+
 console.log(`\n==========================================================`);
 console.log(`Resultado: ${pasadas} pasadas, ${fallidas} fallidas`);
 console.log(`==========================================================`);

@@ -7,7 +7,15 @@ Registro de las muestras independientes que respaldan (o tumbarían) el tope.
 |---|---|---|---|---|---|
 | 1 (9-oct) | el de siempre | 1 útil | 1 (#22) | **0** | SÍ — muestra demasiado pequeña |
 | 2 (9-oct) | el de siempre | **58** | 2 (#29, #33) | **0** | SÍ — y **confirmado a mano** |
-| 3 (pendiente) | **otro distinto** | — | — | — | — |
+| 3 (9-oct) | **otro distinto** | **75** | 1 | **0** | SÍ — margen **x3,3** |
+
+**APLICADO el 9-oct-2026.** Tres tandas consecutivas por encima del umbral
+x2 que se había fijado de antemano. `max_new_tokens: 180` en
+`transcriptor-worker.js` y `TOPE_TOKENS_ASR = 180` en `offscreen.js`.
+
+**Lo que esto NO cubre:** la tanda 3 destapó un segundo mecanismo de
+lentitud que el tope no toca — la frase #11, 35 caracteres y 20.392 ms
+pegada a una alucinación. Ver [`CONTENCION-WHISPER.md`](CONTENCION-WHISPER.md).
 
 ## Lo que ya está confirmado por lectura manual
 
