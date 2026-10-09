@@ -54,6 +54,20 @@ Eso no invalida la palanca; sí acota lo que puede prometer.
 
 ## 2. La aritmética, con tus números
 
+> ### ⚠ EN CUARENTENA DESDE LA TANDA 4 (9-oct)
+>
+> **Todo lo que en esta sección sea una cifra de TIEMPO depende de los 9,92
+> ms/carácter, y esa pendiente no se reprodujo:** en la tanda 4 salió 0,15
+> ms/carácter con R² = 0. La tabla de abajo, el techo de «10,4 s» y el
+> ahorro de «8,3 s» **son estimaciones inciertas**.
+>
+> **Lo que NO está en cuarentena:** la equivalencia 180 tokens ≈ 720
+> caracteres, el resultado de `probarTope()` y el margen x3,3 — todo eso
+> cuenta caracteres, no milisegundos. **La seguridad del tope no depende de
+> la recta**, sólo su beneficio estimado. Por eso el tope no se revierte.
+>
+> Auditoría completa en [`COSTE-WHISPER-REVISION.md`](COSTE-WHISPER-REVISION.md).
+
 Con 3.243 ms fijos y 9,92 ms por carácter, y ~4 caracteres por token en
 inglés:
 

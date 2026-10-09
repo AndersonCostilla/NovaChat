@@ -17,6 +17,18 @@ x2 que se había fijado de antemano. `max_new_tokens: 180` en
 lentitud que el tope no toca — la frase #11, 35 caracteres y 20.392 ms
 pegada a una alucinación. Ver [`CONTENCION-WHISPER.md`](CONTENCION-WHISPER.md).
 
+## Nota de la tanda 4: qué parte de esta evidencia sigue en pie
+
+**Toda.** Las tres tandas de esta tabla se decidieron **contando
+caracteres** (`probarTope` no mira el reloj) y leyendo los textos a mano.
+La tanda 4 puso en duda el modelo de coste en milisegundos —la pendiente de
+9,92 ms/carácter no se reprodujo—, y eso afecta a **cuánto tiempo se ahorra**,
+no a **qué frases se cortan**. Ver
+[`COSTE-WHISPER-REVISION.md`](COSTE-WHISPER-REVISION.md).
+
+Lo que sí hay que recordar: **el tope sigue sin validarse en uso real.** La
+tanda 4 no tuvo ni una alucinación. Ver [`TANDA-4.md`](TANDA-4.md).
+
 ## Lo que ya está confirmado por lectura manual
 
 - Los **3 cortes del detector** de la tanda 2 —incluida la **#29**, recortada
