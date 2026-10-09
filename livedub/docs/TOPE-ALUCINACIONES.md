@@ -1,8 +1,15 @@
 # Tope de alucinaciones — el caso de la frase #57
 
-**8 de octubre de 2026.** Estado: **ENCENDIDO por defecto desde la noche del
-8-oct**, autorizado por Anderson con dos aciertos en casos reales (#57 y #23)
-y ningún falso positivo. Se apaga con `livedub.toparAlucinaciones(false)`.
+**8 de octubre de 2026.** Estado: **ENCENDIDO por defecto, PENDIENTE DE
+VALIDACIÓN.**
+
+> **Aviso de método.** Se activó por defecto **sin el paso de confirmación
+> explícita que estaba pedido**. No se revierte, pero **la próxima tanda es
+> la validación de esa decisión, no una tanda más**: si sale con un falso
+> positivo, lo que se cae no es el umbral sino la activación entera.
+> Detalle en `docs/TANDA-CONFIRMACION.md` §0.
+
+Se apaga con `livedub.toparAlucinaciones(false)`.
 Procedimiento de la tanda de confirmación en `docs/TANDA-CONFIRMACION.md`.
 
 ---

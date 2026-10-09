@@ -805,6 +805,88 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
   });
 }
 
+
+/* ------------------------------------------------------------------ */
+/* eventosCatastroficos(): el criterio de "resuelto", en código        */
+/* ------------------------------------------------------------------ */
+{
+  // Cada umbral viene de un fallo vivido. Que sea código y no impresión es
+  // justo el punto: "no hubo eventos" tiene que ser comprobable.
+  const frase = (c, id, { asr = 4000, mt = 2000, voz = 5000, audio = 5, trozos = 2, grupos = null } = {}) => {
+    let t = c.__t || 0;
+    const reloj = () => t;
+    void reloj;
+    c.abrir(id, { tInicioHabla: 0, segundosAudio: audio, motivoCierre: 'silencio' });
+    c.anotarLote(id, { trozos });
+    if (grupos) c.anotarGrupos(id, grupos);
+    return { asr, mt, voz };
+  };
+  void frase;
+
+  // Se construye con un reloj controlado para poder fijar las duraciones.
+  const tanda = (frases) => {
+    let t = 0;
+    const c = crearCronometro({ ahora: () => t });
+    frases.forEach((f, i) => {
+      const id = i + 1;
+      t += 1000;
+      c.abrir(id, { tInicioHabla: t - (f.audio ?? 5) * 1000, segundosAudio: f.audio ?? 5, motivoCierre: 'silencio' });
+      c.anotarLote(id, { trozos: f.trozos ?? 2 });
+      t += f.asr ?? 4000;
+      c.marcar(id, 'tFinAsr');
+      t += f.mt ?? 2000;
+      c.marcar(id, 'tFinMt');
+      if (f.grupos) c.anotarGrupos(id, f.grupos);
+      c.marcar(id, 'tInicioVoz');
+      t += f.voz ?? 5000;
+      c.marcar(id, 'tFinVoz');
+      c.cerrar(id, { motivoFinal: 'doblada' });
+    });
+    return c.eventosCatastroficos();
+  };
+
+  comprobar('una tanda sana se declara LIMPIA', () => {
+    const e = tanda(Array(20).fill({}));
+    assert.match(e['¿tanda limpia?'], /^SÍ/);
+    assert.equal(e.sucesos.length, 0);
+    assert.equal(e['frases en la tanda'], 20);
+  });
+
+  comprobar('la #3 (traducción de 30002 ms) se caza', () => {
+    const e = tanda([{}, {}, { mt: 30002 }, {}]);
+    assert.match(e['¿tanda limpia?'], /^NO/);
+    assert.ok(e.sucesos.some((s) => s.qué === 'traducción de 30 s o más'));
+  });
+
+  comprobar('el Whisper degradado (16-25 s) se caza', () => {
+    const e = tanda([{}, { asr: 16735 }]);
+    assert.ok(e.sucesos.some((s) => s.qué === 'Whisper de 16 s o más'));
+  });
+
+  comprobar('el lote de 12 trozos se caza', () => {
+    const e = tanda([{}, { trozos: 12 }]);
+    assert.ok(e.sucesos.some((s) => s.qué === 'lote de trozos disparado'));
+  });
+
+  comprobar('un grupo de generate() por encima del presupuesto se caza', () => {
+    const e = tanda([{}, { grupos: [3000, 32000] }]);
+    assert.ok(e.sucesos.some((s) => s.qué === 'un grupo de generate() pasó del presupuesto'));
+  });
+
+  comprobar('la #23 (92 s de voz para 12,03 s de audio) se caza', () => {
+    const e = tanda([{}, { audio: 12.03, voz: 92000 }]);
+    const s = e.sucesos.find((x) => x.qué === 'el doblaje ocupó más de 3x el audio');
+    assert.ok(s);
+    assert.match(s.valor, /7\.6/);
+  });
+
+  comprobar('el habla normal (proporción 1,11) NO se marca', () => {
+    // 12,03 s de audio → unos 13,4 s de doblaje. Es lo medido, no un evento.
+    const e = tanda(Array(10).fill({ audio: 12.03, voz: 13400 }));
+    assert.match(e['¿tanda limpia?'], /^SÍ/);
+  });
+}
+
 console.log(`\n==========================================================`);
 console.log(`Resultado: ${pasadas} pasadas, ${fallidas} fallidas`);
 console.log(`==========================================================`);

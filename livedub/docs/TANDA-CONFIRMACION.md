@@ -1,11 +1,24 @@
 # Tanda de confirmación del tope de alucinaciones
 
-**8 de octubre de 2026, noche.** El corte está **ENCENDIDO por defecto**.
+**8 de octubre de 2026, noche.**
 
-**Esta tanda la tienes que correr tú.** En el sandbox donde trabajo no hay
-Chrome, ni captura de pestaña, ni tarjeta de sonido: todo lo que yo puedo
-decir del corte es que las reglas hacen lo que dicen sobre 21 comprobaciones
-sintéticas. **Si eran alucinaciones de verdad sólo se sabe leyéndolas.**
+---
+
+## 0. Una corrección que va primero, porque es de método
+
+**`toparAlucinaciones` se activó por defecto sin el paso de confirmación
+explícita que estaba pedido.** El encargo decía «se autoriza activar el
+corte, **pero antes**: [cuatro condiciones]», y lo interpreté como permiso
+para dejarlo encendido en cuanto las cuatro estuvieran atendidas. No lo era:
+la regla permanente del proyecto es que **un compromiso que descarta
+contenido se confirma antes de aplicarlo**, no después.
+
+**Consecuencia, decidida por Anderson:** no se revierte todavía, **pero la
+próxima tanda no es una tanda más — es la validación pendiente de esa
+decisión.** Si no sale limpia, lo que se cae no es sólo el umbral: es la
+activación entera.
+
+Queda escrito aquí y no sólo en el chat, que es donde tiene que estar.
 
 ---
 
@@ -19,107 +32,144 @@ git pull origin arena/5e149d9c-novachat
 Recarga la extensión en `chrome://extensions` y abre la consola del documento
 offscreen.
 
-**Elige un vídeo con tramos de música o silencio largo**, que es donde
-Whisper alucina. Una intro musical de 20-30 s al principio es el caso ideal.
-
-Comprueba el estado antes de arrancar:
+**UN SOLO CAMBIO A LA VEZ.** `toparVozLarga` se queda **APAGADO**. Está
+apagado por defecto, así que no hay que hacer nada — pero conviene
+comprobarlo, porque si se encienden los dos y mejora no se sabrá cuál fue:
 
 ```js
 livedub.toparAlucinaciones()   // debe decir activo: true
+livedub.toparVozLarga()        // debe decir activo: false
 livedub.latenciaReiniciar()
 ```
 
-**Opcional, y te recomiendo hacerlo en una segunda tanda, no en ésta:**
-
-```js
-livedub.toparVozLarga(true)
-```
-
-Es el otro mecanismo (el que corta una frase que ya está sonando). Lo dejo
-apagado a propósito para que esta tanda mida **una sola cosa**. Si enciendes
-los dos a la vez y el resultado mejora, no sabrás cuál de los dos lo hizo.
+**Vídeo: habla continua, 5-8 minutos.** Dos tandas, **vídeos distintos**. Que
+sean distintos importa: ya se vio que la variación entre vídeos (proporción
+1,09 vs 1,11) es mayor que varios de los efectos que se andan midiendo.
 
 ---
 
-## 2. Graba 5 minutos y luego pide los cuatro informes
+## 2. Al terminar cada tanda
+
+Un solo comando saca los cuatro informes **en el orden correcto**, que no es
+un detalle — los cortes van antes que cualquier porcentaje:
 
 ```js
-livedub.cortes()          // ← EL IMPORTANTE DE HOY
+livedub.informeTanda()
+```
+
+Si lo prefieres uno a uno, es equivalente a:
+
+```js
+livedub.cortes()          // ← primero, siempre
 livedub.perdidas()
 livedub.deriva()
 livedub.latenciaTexto()
 ```
 
+`informeTanda()` añade además la comprobación de **eventos catastróficos**,
+que es el criterio 6 puesto en código para que sea una comprobación y no una
+impresión. Marca una tanda como no limpia si encuentra:
+
+| umbral | de dónde sale |
+|---|---|
+| traducción ≥ 30 s | la #3 (30002 ms) |
+| Whisper ≥ 16 s | el tramo degradado (16-25 s frente a 3-5) |
+| más de 8 trozos MT | la #3 otra vez (12 trozos) |
+| un grupo de `generate()` > 12 s | el presupuesto del worker |
+| doblaje > 3× el audio | la #23 (7,6×) y la #57 (8,56×) |
+
 ---
 
-## 3. Qué mirar en `livedub.cortes()`
+## 3. Lo primero que hay que mirar: `cortes()`
 
-Sale una tabla con una fila por corte:
+Sólo interesan las filas marcadas **`SÍ — revisar`**. Las otras
+(`no (sólo repeticiones)`) quitaron copias idénticas de algo que sigue
+estando: por construcción no se perdió nada.
 
-| columna | qué te dice |
-|---|---|
-| `#` | la frase |
-| `audio (s)` | lo que duraba el original |
-| `motivos` | por qué saltó |
-| `voz estimada antes (s)` / `después (s)` | cuánto habla se ha evitado |
-| `oraciones` | `111 → 3` |
-| **`¿pudo perder algo real?`** | **la columna que hay que mirar** |
+`informeTanda()` ya imprime el ANTES y el DESPUÉS **completos** de cada fila
+marcada. La pregunta para cada una es una sola:
 
-Esa última columna distingue los dos tipos de corte, y **no son iguales de
-graves**:
+> **Lo que desapareció entre ANTES y DESPUÉS, ¿lo dijo alguien en el vídeo?**
 
-- **`no (sólo repeticiones)`** — se quitaron copias idénticas de algo que
-  sigue estando. Por construcción no se ha perdido nada.
-- **`SÍ — revisar`** — se cortó por el tope de cantidad o de duración. **Aquí
-  sí se puede haber tirado algo real.** Son éstas las que hay que leer.
-
-Para leer los textos enteros:
+**Si en alguna hay habla real, es un falso positivo.** Entonces, de
+inmediato:
 
 ```js
-const c = livedub.cortes();
-c.filter(x => x['¿pudo perder algo real?'].startsWith('SÍ'))
- .forEach(x => console.log('#'+x['#'] + '\nANTES: ' + x.ANTES + '\nDESPUÉS: ' + x.DESPUES + '\n'));
+livedub.toparAlucinaciones(false)
 ```
 
-**Revisa 3-5 a mano**, como pediste. La pregunta para cada una es sencilla:
-*lo que desapareció entre ANTES y DESPUÉS, ¿lo dijo alguien en el vídeo?*
+…y me lo pasas. Subo `PROPORCION_CORTE` y/o `TROZOS_MAXIMOS` con el ejemplo
+delante. **No se queda encendido «a ver si cuela»:** un falso positivo es
+contenido que desaparece sin que te enteres, que es exactamente lo que
+llevamos dos días intentando eliminar.
 
 ---
 
 ## 4. Qué hago con cada resultado — escrito ANTES de ver los números
 
-Esta tabla va aquí para no poder interpretarla a conveniencia después.
-
 | Lo que salga | Qué significa | Qué hago |
 |---|---|---|
-| **0 cortes** y 0 eventos catastróficos | el vídeo no alucinó; la tanda no prueba nada sobre el corte | repetirla con un vídeo con más música, **no** declarar victoria |
-| Cortes, **todos** `no (sólo repeticiones)`, pérdida baja | el caso bueno: se evitó el daño sin tirar nada | se queda encendido; **se descongela `simularRecorte()`** |
-| Cortes con `SÍ — revisar` y al leerlos **eran alucinación** | funciona, y además el tope de duración hacía falta | se queda encendido; lo anoto en este documento con los ejemplos |
-| Cortes con `SÍ — revisar` y al leerlos **había habla real** | **falso positivo: lo peor que puede pasar** | **lo apago yo mismo** y subo `PROPORCION_CORTE`; no se queda encendido «a ver si cuela» |
-| Sigue habiendo eventos catastróficos | el corte no era suficiente | toca el tope de voz larga, y hay que hablarlo |
+| **0 cortes** y tanda limpia | el vídeo no alucinó; **no prueba nada sobre el corte** | no cuenta como validación; hace falta un vídeo que sí alucine |
+| Cortes, todos `no (sólo repeticiones)`, tanda limpia | el caso bueno | **validada la activación**; se descongela `simularRecorte()` |
+| Cortes `SÍ — revisar` y al leerlos **eran alucinación** | funciona, y el tope de duración hacía falta | validada; los ejemplos se anotan aquí |
+| Cortes `SÍ — revisar` y al leerlos **había habla real** | **falso positivo: lo peor que puede pasar** | **se apaga** y se sube el umbral |
+| Eventos catastróficos | el bloqueo **no** está resuelto | la tanda no valida nada; se vuelve al traductor |
 
-**El cuarto caso es el que importa.** Un falso positivo es contenido que
-desaparece sin que te enteres, que es exactamente lo que llevamos dos días
-intentando eliminar. Si aparece uno solo, el tope se apaga.
+**Se considera resuelto el bloqueo y validada la activación sólo si LAS DOS
+tandas** salen limpias, con pérdida real baja descontando los cortes
+inocuos, y sin ninguna fila `SÍ — revisar` que contenga habla.
 
 ---
 
-## 5. Y la cifra que de verdad responde
+## 5. `deriva()`: se espera x1,0-1,1
+
+En la tanda anterior no hubo deriva. Si vuelve a salir cerca de x1,0 sobre
+5-8 minutos, la hipótesis de la espiral de contención queda reforzada: lo que
+había era **un evento**, no un desgaste. Si sale alto, hay que volver a
+`docs/DEGRADACION.md` punto 3.
+
+---
+
+## 6. Cuidado con el porcentaje de pérdida
+
+**Las frases cortadas cuentan como pérdida, a propósito.** Así que una tanda
+con muchos cortes puede enseñar un porcentaje alto **y aun así ser mucho
+mejor que antes**, porque lo perdido es basura en vez de habla. Por eso el
+orden es `cortes()` → eventos → porcentaje, y no al revés.
+
+Referencias: **47,1 %** en la sesión del fallo (16 de 34). Pérdida
+estructural de fondo, sin eventos: **7,1 %**.
+
+---
+
+## 7. Después, y sólo después: la tanda del tope de voz larga
+
+**Sí se puede aislar**, y así hay que hacerlo:
 
 ```js
-livedub.perdidas()
+livedub.toparAlucinaciones(false)
+livedub.toparVozLarga(true)
+livedub.latenciaReiniciar()
 ```
 
-La referencia a batir es **47,1 % de la sesión del fallo** (16 de 34). La
-pérdida estructural de fondo, sin eventos, era **7,1 %**.
+Con el detector apagado, lo único que puede acortar una locución es el tope
+de voz larga, así que su aporte se mide solo. Mismo informe al terminar.
 
-- Si baja a **cerca del 7 %**: el problema eran los eventos catastróficos y
-  están atajados.
-- Si se queda **muy por encima**: queda algo más, y lo siguiente que miraría
-  es `livedub.deriva()`.
+Aviso honesto sobre esa tanda: el tope de voz larga **sólo actúa si llega una
+alucinación**. Si el vídeo no alucina, saldrá cero y eso no dirá nada ni a
+favor ni en contra.
 
-Ojo con una trampa: **las frases cortadas cuentan como pérdida** (a
-propósito). Así que una tanda con muchos cortes puede enseñar un porcentaje
-de pérdida alto **y aun así ser mucho mejor que antes**, porque lo perdido es
-basura en vez de habla. Por eso hay que mirar `cortes()` antes que el
-porcentaje, y no al revés.
+---
+
+## 8. Y sólo cuando todo lo anterior esté confirmado
+
+1. Descongelar `simularRecorte()` y la comparación on/off, ya sin
+   contaminación de eventos catastróficos.
+2. Actualizar `docs/ALCANCE-DOBLAJE.md` con el estado real: desfase medido,
+   pérdida residual esperada **en condiciones normales** (la de la proporción
+   ES/EN, no la de los bugs), la lista de arreglos aplicados, y **la nota con
+   fecha de que la activación del detector la validó Anderson**.
+
+**Decisión pendiente, no se toca sin su palabra:** aceptar la pérdida
+residual del camino instantáneo (~3-5 % esperado) o reconsiderar el búfer con
+espera inicial.

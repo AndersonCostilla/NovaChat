@@ -841,6 +841,60 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     };
   }
 
+  /**
+   * ¿Ha habido algún EVENTO CATASTRÓFICO en esta tanda?
+   *
+   * Criterio 6 del encargo del 8-oct, puesto en código para que sea una
+   * comprobación y no una impresión: "sin timeouts de 30+ s, sin trozos MT
+   * disparados". Cada umbral viene de un fallo concreto ya vivido, y va
+   * anotado con cuál.
+   */
+  function eventosCatastroficos() {
+    const ms = (a, b) => (a !== null && b !== null ? b - a : null);
+    const sucesos = [];
+
+    for (const f of historial) {
+      const tMt = ms(f.tFinAsr, f.tFinMt);
+      const tAsr = ms(f.tFinHabla, f.tFinAsr);
+      const vozMs = ms(f.tInicioVoz, f.tFinVoz);
+      const peorGrupo = f.gruposMt ? Math.max(...f.gruposMt) : null;
+
+      // La #3: traducción de 30002 ms que agotó el tiempo de espera.
+      if (tMt !== null && tMt >= 30000) {
+        sucesos.push({ '#': f.id, qué: 'traducción de 30 s o más', valor: `${Math.round(tMt)} ms` });
+      }
+      // El tramo degradado: Whisper de 16-25 s frente a 3-5 s habituales.
+      if (tAsr !== null && tAsr >= 16000) {
+        sucesos.push({ '#': f.id, qué: 'Whisper de 16 s o más', valor: `${Math.round(tAsr)} ms` });
+      }
+      // La #3 otra vez: 12 trozos. El habla real da 1-2, 3-4 en el peor caso.
+      if (f.trozosMt !== null && f.trozosMt > 8) {
+        sucesos.push({ '#': f.id, qué: 'lote de trozos disparado', valor: `${f.trozosMt} trozos` });
+      }
+      // Un solo grupo de generate() por encima del presupuesto: significa
+      // que el worker estuvo ciego más de lo que se le permite.
+      if (peorGrupo !== null && peorGrupo > 12000) {
+        sucesos.push({ '#': f.id, qué: 'un grupo de generate() pasó del presupuesto', valor: `${peorGrupo} ms` });
+      }
+      // La #23 y la #57: el altavoz ocupado muchas veces lo que duró el audio.
+      if (vozMs !== null && f.segundosAudio && vozMs / 1000 / f.segundosAudio > 3) {
+        sucesos.push({
+          '#': f.id,
+          qué: 'el doblaje ocupó más de 3x el audio',
+          valor: `${(vozMs / 1000 / f.segundosAudio).toFixed(2)}x (${(vozMs / 1000).toFixed(1)} s)`
+        });
+      }
+    }
+
+    return {
+      '¿tanda limpia?': sucesos.length
+        ? `NO — ${sucesos.length} suceso(s). La tanda NO valida nada.`
+        : 'SÍ — ningún evento catastrófico en esta tanda.',
+      sucesos,
+      'frases en la tanda': historial.length
+    };
+  }
+
   function resumenPerdidas() {
     const porEtapa = {};
     let segundosTotales = 0;
@@ -884,6 +938,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     anotarRecorte,
     anotarAlucinacion,
     anotarGrupos,
+    eventosCatastroficos,
     deriva,
     anotarPerdida,
     resumenPerdidas,

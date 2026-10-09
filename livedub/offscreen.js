@@ -1220,6 +1220,73 @@ globalThis.livedub = {
   },
 
   /**
+   * TANDA DE CONFIRMACIÓN (docs/TANDA-CONFIRMACION.md).
+   *
+   * Un solo comando que saca los cuatro informes EN EL ORDEN CORRECTO, que
+   * no es un detalle: los cortes se miran ANTES que cualquier porcentaje,
+   * porque una tanda con muchos cortes puede enseñar una pérdida alta y aun
+   * así ser mejor que antes si lo perdido era basura.
+   *
+   * Uso: livedub.informeTanda()
+   */
+  informeTanda: () => {
+    const sep = (t) => console.log(`\n${'═'.repeat(62)}\n  ${t}\n${'═'.repeat(62)}`);
+
+    sep('1 · CORTES DEL DETECTOR — esto primero, antes que ningún %');
+    const losCortes = globalThis.livedub.cortes();
+    const revisar = losCortes.filter((c) => String(c['¿pudo perder algo real?']).startsWith('SÍ'));
+    if (revisar.length) {
+      console.warn(
+        `[LiveDub] ⚠ ${revisar.length} corte(s) PUDIERON tirar algo real. ` +
+          'Hay que LEERLOS, no basta con contarlos:'
+      );
+      for (const c of revisar) {
+        console.log(`\n--- #${c['#']} (${c.motivos}) ---\nANTES:   ${c.ANTES}\nDESPUÉS: ${c.DESPUES}`);
+      }
+      console.warn(
+        'Si en alguno de esos ANTES hay habla de verdad, es un FALSO POSITIVO: ' +
+          'livedub.toparAlucinaciones(false) y avisa. No se deja encendido a ver si cuela.'
+      );
+    } else if (losCortes.length) {
+      console.log('[LiveDub] ✔ todos los cortes fueron repeticiones idénticas: no se perdió nada real.');
+    }
+
+    sep('2 · ¿EVENTOS CATASTRÓFICOS? — el criterio de "resuelto"');
+    const eventos = cronometro.eventosCatastroficos();
+    console.log(eventos['¿tanda limpia?']);
+    if (eventos.sucesos.length) console.table(eventos.sucesos);
+
+    sep('3 · PÉRDIDAS');
+    const perdidas = globalThis.livedub.perdidas();
+
+    sep('4 · ¿SE DEGRADA CON EL TIEMPO? — se espera x1,0-1,1');
+    const laDeriva = globalThis.livedub.deriva();
+
+    sep('5 · TABLA POR FRASE');
+    globalThis.livedub.latenciaTexto();
+
+    sep('VEREDICTO PROVISIONAL (la lectura a mano manda sobre esto)');
+    const limpia = /^SÍ/.test(eventos['¿tanda limpia?']);
+    if (!eventos['frases en la tanda']) {
+      console.warn('No hay frases: la tanda no mide nada.');
+    } else if (revisar.length) {
+      console.warn(
+        `PENDIENTE DE TU LECTURA. ${revisar.length} corte(s) marcados "SÍ — revisar" ` +
+          'arriba. Hasta que los leas, esta tanda no valida la activación del detector.'
+      );
+    } else if (limpia) {
+      console.log(
+        '✔ Tanda limpia y sin cortes dudosos. Si la segunda tanda sale igual, ' +
+          'queda validada la activación del detector y resuelto el bloqueo del traductor.'
+      );
+    } else {
+      console.warn('✘ Hubo eventos catastróficos: esta tanda NO valida nada. Pega la tabla del punto 2.');
+    }
+
+    return { cortes: losCortes, eventos, perdidas, deriva: laDeriva };
+  },
+
+  /**
    * Los textos que el tope de alucinaciones ha recortado, con el antes y el
    * después enteros. Para revisarlos A MANO, que es la única forma de saber
    * si eran alucinaciones de verdad. Uso: livedub.cortes()
