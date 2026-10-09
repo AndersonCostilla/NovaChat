@@ -887,6 +887,95 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
   });
 }
 
+
+/* ------------------------------------------------------------------ */
+/* costeWhisper(): separar el encoder (fijo) del decoder (por texto)   */
+/* ------------------------------------------------------------------ */
+{
+  // La #13 tardó 21.014 ms con 90 oraciones cuando la mediana eran 4.310.
+  // "Whisper es coste fijo" no puede explicar eso. La hipótesis es que el
+  // encoder es fijo y el decoder va por token; esto comprueba que el ajuste
+  // sabe recuperar esas dos partes cuando de verdad están ahí.
+  const sesionSintetica = (fijo, porCaracter, tamanos) => {
+    let t = 0;
+    const c = crearCronometro({ ahora: () => t });
+    tamanos.forEach((chars, i) => {
+      const id = i + 1;
+      t += 1000;
+      c.abrir(id, { tInicioHabla: 0, segundosAudio: 10, motivoCierre: 'silencio' });
+      t += Math.round(fijo + chars * porCaracter);
+      c.marcar(id, 'tFinAsr', { texto: 'x'.repeat(chars), caracteres: chars });
+      c.cerrar(id, { motivoFinal: 'doblada' });
+    });
+    return c.costeWhisper();
+  };
+
+  const variados = [...Array(30)].map((_, i) => 230 + ((i * 37) % 120) - 60);
+
+  comprobar('con pocas frases NO se inventa una recta', () => {
+    const r = sesionSintetica(1800, 10, [100, 200, 300]);
+    assert.match(r['¿se puede responder?'], /^NO/);
+  });
+
+  comprobar('recupera el coste fijo y el coste por carácter', () => {
+    const r = sesionSintetica(1826, 10.7, [...variados, 1500]);
+    assert.ok(Math.abs(r['coste FIJO del encoder (ms)'] - 1826) <= 5);
+    assert.ok(Math.abs(r['coste por carácter del decoder (ms)'] - 10.7) < 0.2);
+    assert.equal(r['R² (0 a 1)'], 1);
+    assert.match(r['¿se puede fiar uno?'], /^SÍ/);
+  });
+
+  comprobar('señala la frase más cara, que es la que hay que mirar', () => {
+    const r = sesionSintetica(1826, 10.7, [...variados, 1500]);
+    assert.match(r['frase más cara'], /1500 caracteres/);
+  });
+
+  comprobar('si el tiempo NO depende del texto, lo dice en vez de fingir', () => {
+    // Coste puramente fijo con ruido: la recta no debe presumir de nada.
+    let t = 0;
+    const c = crearCronometro({ ahora: () => t });
+    variados.forEach((chars, i) => {
+      const id = i + 1;
+      t += 1000;
+      c.abrir(id, { tInicioHabla: 0, segundosAudio: 10, motivoCierre: 'silencio' });
+      t += 4300 + ((i * 991) % 2000) - 1000; // ruido, sin relación con chars
+      c.marcar(id, 'tFinAsr', { texto: 'x'.repeat(chars), caracteres: chars });
+      c.cerrar(id, { motivoFinal: 'doblada' });
+    });
+    const r = c.costeWhisper();
+    assert.ok(r['R² (0 a 1)'] < 0.6, `R² = ${r['R² (0 a 1)']}`);
+    assert.match(r['¿se puede fiar uno?'], /^NO/);
+  });
+
+  comprobar('lleva el aviso de que es un ajuste, no una ley', () => {
+    const r = sesionSintetica(1826, 10.7, [...variados, 1500]);
+    assert.match(r.aviso, /no es una ley|no una ley/);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* segundosAudioDe(): el dato que el detector estaba sin recibir       */
+/* ------------------------------------------------------------------ */
+{
+  comprobar('devuelve la duración del AUDIO de una frase viva', () => {
+    const c = crearCronometro();
+    c.abrir(13, { tInicioHabla: 0, segundosAudio: 9.02, motivoCierre: 'tope' });
+    assert.equal(c.segundosAudioDe(13), 9.02);
+  });
+
+  comprobar('sigue estando después de cerrarla', () => {
+    const c = crearCronometro();
+    c.abrir(13, { tInicioHabla: 0, segundosAudio: 9.02, motivoCierre: 'tope' });
+    c.cerrar(13, { motivoFinal: 'doblada' });
+    assert.equal(c.segundosAudioDe(13), 9.02);
+  });
+
+  comprobar('devuelve null si no sabe, en vez de un número inventado', () => {
+    const c = crearCronometro();
+    assert.equal(c.segundosAudioDe(999), null);
+  });
+}
+
 console.log(`\n==========================================================`);
 console.log(`Resultado: ${pasadas} pasadas, ${fallidas} fallidas`);
 console.log(`==========================================================`);

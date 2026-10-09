@@ -574,7 +574,21 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
   // del 856 % — y bloqueó la cola de voz el tiempo suficiente para llevarse
   // por delante 14 frases legítimas seguidas (ids 58 a 68).
   const trozosOriginales = trocearEnOraciones(texto);
-  const diagnostico = analizarTrozos(trozosOriginales, { segundosAudio: duracionMs / 1000 });
+
+  // LA DURACIÓN DEL AUDIO, NO LO QUE TARDÓ WHISPER.
+  //
+  // Error del 8-oct-2026 que invalidó cuatro de los cinco cortes de la
+  // tanda de 64 frases: aquí se pasaba `duracionMs`, que es el tiempo de
+  // PROCESO del transcriptor (mediana 4,31 s), como si fuera la duración
+  // del audio (hasta 12,03 s). El criterio de proporción dividía por un
+  // número unas tres veces más pequeño de lo debido, así que una frase
+  // normal a 1,11x aparentaba más de 3x y saltaba el aviso.
+  //
+  // El dato bueno entra por el VAD y lo guarda el cronómetro. Hay que
+  // pedirlo. Si por lo que sea no está, NO se inventa: se pasa null y los
+  // criterios que dependen de la duración no se evalúan.
+  const segundosAudio = cronometro.segundosAudioDe(id);
+  const diagnostico = analizarTrozos(trozosOriginales, { segundosAudio });
   cronometro.anotarAlucinacion(id, diagnostico);
 
   if (diagnostico.esSospechosa) {
@@ -586,42 +600,75 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
     );
 
     if (toparAlucinacionesActivo) {
-      const saneado = sanearTrozos(trozosOriginales, { segundosAudio: duracionMs / 1000 });
-      const quitados = trozosOriginales.length - saneado.trozos.length;
+      const saneado = sanearTrozos(trozosOriginales, { segundosAudio });
       const antes = texto;
-      texto = saneado.trozos.join(' ');
+      const despues = saneado.trozos.join(' ');
 
-      // Se guarda el ANTES y el DESPUÉS enteros para poder comprobar a mano
-      // que lo descartado era alucinación y no habla.
+      // SE MIDE EN CARACTERES, NO EN ORACIONES.
+      //
+      // La tanda de 64 frases enseñó por qué: cuatro cortes aparecían como
+      // "3 → 3", "1 → 1"… y aun así contaban como pérdida. Conservar el
+      // número de oraciones NO significa conservar el contenido: la
+      // desduplicación interna quita palabras DENTRO de una oración y el
+      // recuento de oraciones no se entera. El carácter sí.
+      const quitadosCaracteres = antes.length - despues.length;
+      const quitadasOraciones = trozosOriginales.length - saneado.trozos.length;
+      const huboCambio = quitadosCaracteres > 0 || quitadasOraciones > 0;
+
+      texto = despues;
+
       cortes.push({
         '#': id,
-        'audio (s)': Number((duracionMs / 1000).toFixed(2)),
+        'audio (s)': segundosAudio,
+        qué: huboCambio
+          ? saneado.seCorto
+            ? 'texto recortado parcialmente'
+            : 'alucinación eliminada'
+          : 'sospechosa CONSERVADA ÍNTEGRA',
         motivos: diagnostico.motivos.join(' '),
+        oraciones: `${trozosOriginales.length} → ${saneado.trozos.length}`,
+        // La columna que faltaba. Sin ella, "3 → 3" parecía decir "no se
+        // tocó nada" cuando podía haberse quitado media oración.
+        caracteres: `${antes.length} → ${despues.length}`,
+        'caracteres quitados': quitadosCaracteres,
         'voz estimada antes (s)': diagnostico.segundosHablaEstimados,
-        'voz estimada después (s)': Number(
-          ((texto.length * 1.11) / 17.2).toFixed(1)
-        ),
-        'oraciones': `${trozosOriginales.length} → ${saneado.trozos.length}`,
-        '¿pudo perder algo real?': saneado.seCorto ? 'SÍ — revisar' : 'no (sólo repeticiones)',
+        'voz estimada después (s)': Number(((despues.length * 1.11) / 17.2).toFixed(1)),
+        '¿pudo perder algo real?': !huboCambio
+          ? 'no (no se tocó nada)'
+          : saneado.seCorto
+            ? 'SÍ — revisar'
+            : 'no (sólo repeticiones)',
         ANTES: antes,
-        DESPUES: texto
+        DESPUES: despues
       });
       while (cortes.length > MAX_CORTES_GUARDADOS) cortes.shift();
-      registrarPerdida({
-        id,
-        // Lo descartado es, casi con seguridad, texto que nunca se dijo. Se
-        // cuenta igual: si algún día resulta que era habla real, tiene que
-        // salir en el recuento y no desaparecer sin dejar rastro.
-        segundos: null,
-        etapa: saneado.seCorto ? 'alucinación (cortada por tope)' : 'alucinación (repeticiones)',
-        detalle:
-          `${quitados} de ${trozosOriginales.length} oraciones descartadas ` +
-          `(${saneado.quitadosPorRepeticion} por repetición entre oraciones, ` +
-          `${saneado.quitadosPorRepeticionInterna} palabras por repetición interna, ` +
-          `${saneado.quitadosPorTope} por tope de cantidad, ` +
-          `${saneado.quitadosPorDuracion} por tope de duración).`,
-        cerrarFrase: false
-      });
+
+      // SÓLO SE CUENTA COMO PÉRDIDA SI DE VERDAD SE QUITÓ ALGO.
+      //
+      // Error de contabilidad del 8-oct: bastaba con que la frase fuera
+      // SOSPECHOSA para apuntarle una pérdida, aunque el saneado no le
+      // tocara ni un carácter. Eso infló el recuento con cuatro frases
+      // (#31, #33, #51, #59) que salieron enteras por el altavoz.
+      if (huboCambio) {
+        registrarPerdida({
+          id,
+          segundos: null,
+          etapa: saneado.seCorto ? 'alucinación (cortada por tope)' : 'alucinación (repeticiones)',
+          detalle:
+            `${quitadosCaracteres} caracteres y ${quitadasOraciones} oraciones de ` +
+            `${trozosOriginales.length} descartadas ` +
+            `(${saneado.quitadosPorRepeticion} oraciones por repetición, ` +
+            `${saneado.quitadosPorRepeticionInterna} palabras por repetición interna, ` +
+            `${saneado.quitadosPorTope} por tope de cantidad, ` +
+            `${saneado.quitadosPorDuracion} por tope de duración).`,
+          cerrarFrase: false
+        });
+      } else {
+        console.log(
+          `[LiveDub] frase #${id}: sospechosa, pero el saneado no le ha quitado nada. ` +
+            'Sale entera. NO cuenta como pérdida.'
+        );
+      }
     }
   }
 
@@ -1170,6 +1217,17 @@ globalThis.livedub = {
     return d;
   },
 
+  /**
+   * Separa el coste de Whisper en parte fija (encoder) y parte proporcional
+   * al texto (decoder), ajustando una recta sobre las frases de la sesión.
+   * Uso: livedub.costeWhisper()
+   */
+  costeWhisper: () => {
+    const r = cronometro.costeWhisper();
+    console.table(r);
+    return r;
+  },
+
   perdidas: () => {
     const r = cronometro.resumenPerdidas();
     if (!r['frases perdidas']) {
@@ -1234,7 +1292,7 @@ globalThis.livedub = {
 
     sep('1 · CORTES DEL DETECTOR — esto primero, antes que ningún %');
     const losCortes = globalThis.livedub.cortes();
-    const revisar = losCortes.filter((c) => String(c['¿pudo perder algo real?']).startsWith('SÍ'));
+    const revisar = losCortes.filter((c) => c.qué === 'texto recortado parcialmente');
     if (revisar.length) {
       console.warn(
         `[LiveDub] ⚠ ${revisar.length} corte(s) PUDIERON tirar algo real. ` +
@@ -1248,7 +1306,10 @@ globalThis.livedub = {
           'livedub.toparAlucinaciones(false) y avisa. No se deja encendido a ver si cuela.'
       );
     } else if (losCortes.length) {
-      console.log('[LiveDub] ✔ todos los cortes fueron repeticiones idénticas: no se perdió nada real.');
+      console.log(
+        '[LiveDub] ✔ ninguna frase se recortó parcialmente: lo que se quitó eran ' +
+          'repeticiones idénticas, y las sospechosas sin cambios salieron enteras.'
+      );
     }
 
     sep('2 · ¿EVENTOS CATASTRÓFICOS? — el criterio de "resuelto"');
@@ -1293,15 +1354,57 @@ globalThis.livedub = {
    */
   cortes: () => {
     if (!cortes.length) {
-      console.log('[LiveDub] el tope de alucinaciones no ha cortado nada en esta sesión.');
+      console.log('[LiveDub] el detector no ha intervenido en ninguna frase de esta sesión.');
       return [];
     }
-    console.table(
-      cortes.map(({ ANTES, DESPUES, ...resto }) => resto)
-    );
+    console.table(cortes.map(({ ANTES, DESPUES, ...resto }) => resto));
+
+    // CUATRO CATEGORÍAS SEPARADAS, no un número único.
+    //
+    // "5 cortes" mezclaba cosas que no se parecen en nada: una alucinación
+    // de 90 oraciones eliminada y una frase sospechosa que salió entera. Y
+    // el porcentaje de pérdida las sumaba todas, lo que hacía que el
+    // sistema pareciera peor de lo que es Y escondía lo que importa.
+    const eliminadas = cortes.filter((c) => c.qué === 'alucinación eliminada');
+    const recortadas = cortes.filter((c) => c.qué === 'texto recortado parcialmente');
+    const intactas = cortes.filter((c) => c.qué === 'sospechosa CONSERVADA ÍNTEGRA');
+    const sumar = (lista) => lista.reduce((n, c) => n + c['caracteres quitados'], 0);
+
+    console.log('\n── Qué se ha quitado, por tipo ──');
+    console.table([
+      {
+        tipo: '1 · alucinación eliminada (repeticiones idénticas)',
+        frases: eliminadas.length,
+        'caracteres quitados': sumar(eliminadas),
+        '¿puede ser contenido real?': 'NO — lo quitado es idéntico a lo que queda'
+      },
+      {
+        tipo: '2 · texto recortado parcialmente (tope de cantidad o duración)',
+        frases: recortadas.length,
+        'caracteres quitados': sumar(recortadas),
+        '¿puede ser contenido real?': 'SÍ — hay que leerlo'
+      },
+      {
+        tipo: '3 · sospechosa conservada íntegra',
+        frases: intactas.length,
+        'caracteres quitados': 0,
+        '¿puede ser contenido real?': 'no se tocó; NO cuenta como pérdida'
+      },
+      {
+        tipo: '4 · contenido legítimo perdido (confirmado a mano)',
+        frases: '—',
+        'caracteres quitados': '—',
+        '¿puede ser contenido real?': 'lo rellenas tú al revisar el tipo 2'
+      }
+    ]);
+
     console.log(
-      `[LiveDub] ${cortes.length} corte(s). Los textos completos van en el array devuelto ` +
-        '(campos ANTES y DESPUES). Revisa 3-5 a mano antes de fiarte del número.'
+      `\n[LiveDub] ${cortes.length} frase(s) tocadas por el detector: ` +
+        `${eliminadas.length} alucinación eliminada, ${recortadas.length} recortada parcialmente, ` +
+        `${intactas.length} conservada íntegra.\n` +
+        'SÓLO las del tipo 2 pueden haber perdido habla. Los textos completos están en el ' +
+        'array devuelto (campos ANTES y DESPUES). La fila 4 no la puede rellenar el programa: ' +
+        'sólo se sabe leyendo.'
     );
     return cortes;
   },

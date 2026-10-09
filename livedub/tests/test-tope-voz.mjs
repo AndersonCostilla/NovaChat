@@ -32,9 +32,41 @@ comprobar('el detector se ejecuta ANTES de la llamada a traducir()', () => {
 });
 
 comprobar('el saneado reasigna el texto antes de esa llamada', () => {
-  const sanea = offscreen.indexOf('texto = saneado.trozos.join');
+  const sanea = offscreen.indexOf('sanearTrozos(');
+  const reasigna = offscreen.indexOf('texto = despues;');
   const traduce = offscreen.indexOf('traductor?.traducir(');
-  assert.ok(sanea > 0 && sanea < traduce);
+  assert.ok(sanea > 0 && reasigna > sanea, 'el saneado no reasigna el texto');
+  assert.ok(reasigna < traduce, 'se reasigna DESPUÉS de encolar: hay ventana');
+});
+
+comprobar('el detector recibe la duración del AUDIO, no la de Whisper', () => {
+  // El fallo del 8-oct: se pasaba duracionMs (tiempo de proceso del
+  // transcriptor, mediana 4,31 s) como si fuera la duración del audio
+  // (hasta 12,03 s). Dividir por un número 3x menor inflaba la proporción
+  // y hacía saltar el aviso sobre habla normal.
+  assert.ok(
+    /const segundosAudio = cronometro\.segundosAudioDe\(id\)/.test(offscreen),
+    'la duración del audio no se pide al cronómetro'
+  );
+  const pide = offscreen.indexOf('cronometro.segundosAudioDe(id)');
+  const analiza = offscreen.indexOf('analizarTrozos(');
+  assert.ok(pide > 0 && pide < analiza);
+  // Y que no quede ningún rastro del dato equivocado en el detector.
+  assert.ok(
+    !/analizarTrozos\([^)]*duracionMs/.test(offscreen),
+    'analizarTrozos sigue recibiendo duracionMs'
+  );
+  assert.ok(
+    !/sanearTrozos\([^)]*duracionMs/.test(offscreen),
+    'sanearTrozos sigue recibiendo duracionMs'
+  );
+});
+
+comprobar('sólo se cuenta pérdida si de verdad se quitó algo', () => {
+  // Error de contabilidad del 8-oct: bastaba con ser SOSPECHOSA para que se
+  // apuntara una pérdida, aunque el saneado no tocara ni un carácter.
+  assert.ok(/if \(huboCambio\) \{\s*registrarPerdida/.test(offscreen));
+  assert.ok(/const huboCambio =\s*quitadosCaracteres > 0 \|\| quitadasOraciones > 0/.test(offscreen));
 });
 
 comprobar('traducir() es el ÚNICO sitio donde se encola', () => {

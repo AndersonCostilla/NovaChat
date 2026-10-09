@@ -57,6 +57,17 @@ un detalle — los cortes van antes que cualquier porcentaje:
 livedub.informeTanda()
 ```
 
+**La tanda de 64 frases del 8-oct NO cuenta como validación**: cuatro de sus
+cinco cortes eran artefactos de un bug (se le pasaba al detector el tiempo
+de proceso de Whisper como si fuera la duración del audio). Corregido y
+documentado en `docs/CONTABILIDAD-CORTES.md`. Hay que repetirla.
+
+Añade también, una vez por tanda:
+
+```js
+livedub.costeWhisper()   // ¿el tiempo de Whisper depende del texto? (docs/WHISPER-COSTE.md)
+```
+
 Si lo prefieres uno a uno, es equivalente a:
 
 ```js

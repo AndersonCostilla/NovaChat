@@ -167,6 +167,19 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    */
   /** Diagnóstico de alucinación de esta frase (describe, no decide). */
   /** Duración de cada grupo de generate() de esta frase. */
+  /**
+   * Duración REAL del audio de esta frase, en segundos.
+   *
+   * Existe porque el 8-oct-2026 se descubrió que el detector de
+   * alucinaciones estaba usando `duracionMs` del transcriptor como si fuera
+   * la duración del audio, y `duracionMs` es LO QUE TARDÓ WHISPER. El dato
+   * bueno entra por abrir() y vive aquí; hay que pedirlo, no deducirlo.
+   */
+  function segundosAudioDe(id) {
+    const f = vivas.get(id) || historial.find((h) => h.id === id);
+    return f?.segundosAudio ?? null;
+  }
+
   function anotarGrupos(id, grupos) {
     const f = vivas.get(id);
     if (!f || !Array.isArray(grupos) || !grupos.length) return false;
@@ -849,6 +862,80 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    * disparados". Cada umbral viene de un fallo concreto ya vivido, y va
    * anotado con cuál.
    */
+  /**
+   * ¿DE QUÉ SE COMPONE EL COSTE DE WHISPER?
+   *
+   * La #13 de la tanda de 64 tardó 21.014 ms y devolvió 90 oraciones para
+   * ~9 s de audio, cuando la mediana de la tanda eran 4.310 ms. Eso NO
+   * encaja con "Whisper es coste fijo": si lo fuera, 90 oraciones costarían
+   * lo mismo que una.
+   *
+   * La explicación es que el coste tiene dos partes muy distintas:
+   *
+   *   · el ENCODER procesa una ventana de 30 s pase lo que pase → FIJO;
+   *   · el DECODER genera los tokens uno a uno → PROPORCIONAL al texto.
+   *
+   * Con habla normal la segunda parte es pequeña y por eso parecía todo
+   * fijo. En un bucle de repetición el decoder se dispara hasta el tope del
+   * modelo y se lleva el reloj por delante.
+   *
+   * Esto AJUSTA UNA RECTA sobre los datos reales de la sesión (caracteres
+   * contra milisegundos) para separar las dos partes CON MEDIDAS, en vez de
+   * suponerlo. Sin tocar el transcriptor y sin instrumentar nada nuevo: los
+   * dos datos ya estaban en la tabla.
+   */
+  function costeWhisper() {
+    const puntos = historial
+      .filter((f) => f.tFinAsr !== null && f.tFinHabla !== null && typeof f.caracteres === 'number')
+      .map((f) => ({ x: f.caracteres, y: f.tFinAsr - f.tFinHabla, id: f.id }));
+
+    if (puntos.length < 8) {
+      return { '¿se puede responder?': `NO — hacen falta 8 frases con texto y hay ${puntos.length}.` };
+    }
+
+    const n = puntos.length;
+    const mediaX = puntos.reduce((a, p) => a + p.x, 0) / n;
+    const mediaY = puntos.reduce((a, p) => a + p.y, 0) / n;
+    const sxy = puntos.reduce((a, p) => a + (p.x - mediaX) * (p.y - mediaY), 0);
+    const sxx = puntos.reduce((a, p) => a + (p.x - mediaX) ** 2, 0);
+
+    if (sxx === 0) return { '¿se puede responder?': 'NO — todas las frases tienen el mismo tamaño.' };
+
+    const porCaracter = sxy / sxx;
+    const fijo = mediaY - porCaracter * mediaX;
+
+    // R²: cuánto de la variación del tiempo explica el tamaño del texto.
+    // Sin esto la recta se podría estar inventando una relación que no hay.
+    const syy = puntos.reduce((a, p) => a + (p.y - mediaY) ** 2, 0);
+    const residuos = puntos.reduce(
+      (a, p) => a + (p.y - (fijo + porCaracter * p.x)) ** 2,
+      0
+    );
+    const r2 = syy === 0 ? null : Number((1 - residuos / syy).toFixed(3));
+
+    const masCara = puntos.reduce((a, p) => (p.y > a.y ? p : a), puntos[0]);
+
+    return {
+      'frases usadas': n,
+      'coste FIJO del encoder (ms)': Math.round(fijo),
+      'coste por carácter del decoder (ms)': Number(porCaracter.toFixed(2)),
+      'R² (0 a 1)': r2,
+      '¿se puede fiar uno?':
+        r2 === null
+          ? 'no se puede calcular'
+          : r2 > 0.6
+            ? 'SÍ — el tamaño del texto explica la mayor parte del tiempo'
+            : 'NO — el tamaño del texto NO explica el tiempo; la variación viene de otro sitio',
+      'frase más cara': `#${masCara.id}: ${masCara.x} caracteres en ${Math.round(masCara.y)} ms`,
+      'qué ahorraría un tope de texto':
+        `cada 100 caracteres que no se generen son unos ${Math.round(porCaracter * 100)} ms`,
+      'aviso':
+        'Esto es una recta ajustada a esta sesión, no una ley. Con pocas frases ' +
+        'largas la pendiente es poco fiable: hace falta al menos una alucinación ' +
+        'en la muestra para que el extremo esté representado.'
+    };
+  }
+
   function eventosCatastroficos() {
     const ms = (a, b) => (a !== null && b !== null ? b - a : null);
     const sucesos = [];
@@ -938,6 +1025,8 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     anotarRecorte,
     anotarAlucinacion,
     anotarGrupos,
+    costeWhisper,
+    segundosAudioDe,
     eventosCatastroficos,
     deriva,
     anotarPerdida,

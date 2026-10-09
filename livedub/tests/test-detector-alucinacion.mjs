@@ -15,7 +15,8 @@ import {
   TROZOS_MAXIMOS,
   TROZOS_AVISO,
   segundosDeHabla,
-  repeticionInterna
+  repeticionInterna,
+  esRepeticionInternaPatologica
 } from '../detector-alucinacion.js';
 
 let hechas = 0;
@@ -264,6 +265,110 @@ comprobar('no revienta con basura', () => {
     assert.equal(typeof a.esSospechosa, 'boolean');
     assert.ok(Array.isArray(sanearTrozos(v).trozos));
   }
+});
+
+console.log('\n── LA TANDA DE 64 FRASES: los cuatro cortes que no debían existir ──');
+
+// #31 (3→3), #33 (2→2), #51 (1→1) y #59 (5→5) aparecieron como cortes y se
+// contaron como pérdida sin que el número de oraciones bajara.
+//
+// CAUSA: a analizarTrozos() se le pasaba `duracionMs` —el tiempo que tardó
+// WHISPER, mediana 4,31 s— como si fuera la duración del audio, que llega a
+// 12,03 s. Dividir por un número unas 3 veces menor infla la proporción
+// estimada, y una frase normal a 1,11x aparentaba más de 3x.
+
+// Frase real de 12,03 s a ritmo normal: ~230 caracteres (19,1 car/s de
+// origen, deducido de la proporción ES/EN medida de 1,11).
+const FRASE_NORMAL = [
+  'This is what a normal twelve second stretch of speech actually sounds like ' +
+    'when a person is talking at a comfortable pace in a documentary about the ' +
+    'history of the railways, with no pauses worth mentioning anywhere in it.'
+];
+
+comprobar('la muestra de control tiene el tamaño de una frase real de 12 s', () => {
+  // 19,1 caracteres por segundo de origen, deducido de la proporción ES/EN
+  // medida (1,11) y de los 17,2 car/s de la voz. 12,03 s → unos 230.
+  const esperado = Math.round(12.03 * 19.1);
+  assert.ok(
+    Math.abs(FRASE_NORMAL[0].length - esperado) < 25,
+    `${FRASE_NORMAL[0].length} caracteres, se esperaban ~${esperado}`
+  );
+});
+
+comprobar('con la duración del audio CORRECTA, no se sospecha nada', () => {
+  const a = analizarTrozos(FRASE_NORMAL, { segundosAudio: 12.03 });
+  assert.equal(a.esSospechosa, false);
+  assert.ok(a.proporcionEstimada < 2, `${a.proporcionEstimada}x`);
+});
+
+comprobar('con el tiempo de Whisper (4,31 s) se dispara: el falso positivo', () => {
+  // Reproducción exacta del fallo. Esta comprobación es la que habría
+  // cazado el bug antes de que llegara a una tanda real.
+  const a = analizarTrozos(FRASE_NORMAL, { segundosAudio: 4.31 });
+  assert.equal(a.esSospechosa, true);
+  assert.ok(a.proporcionEstimada > 3, `${a.proporcionEstimada}x`);
+  assert.ok(a.motivos.some((m) => m.includes('de voz para')));
+});
+
+comprobar('y aun disparándose, el saneado NO le quitaba nada', () => {
+  // Por eso salían como "3 → 3" y "1 → 1": el aviso está en 3x pero el
+  // corte en 4x, así que no llegaba a recortar. El daño fue de CONTABILIDAD,
+  // no de contenido: esas frases se dijeron enteras.
+  const s = sanearTrozos(FRASE_NORMAL, { segundosAudio: 4.31 });
+  assert.deepEqual(s.trozos, FRASE_NORMAL);
+  assert.equal(s.quitadosPorDuracion, 0);
+  assert.equal(s.seCorto, false);
+});
+
+comprobar('sin duración del audio, los criterios de tiempo no se evalúan', () => {
+  // Preferible a inventarse un número: si el dato no está, ese criterio
+  // calla en vez de adivinar.
+  const a = analizarTrozos(FRASE_NORMAL, { segundosAudio: null });
+  assert.equal(a.esSospechosa, false);
+  assert.equal(a.proporcionEstimada, null); // no se inventa un número
+  // Y tampoco se corta por duración sin saber la duración.
+  const enorme = Array(40).fill(FRASE_NORMAL[0]);
+  assert.equal(sanearTrozos(enorme, { segundosAudio: null }).quitadosPorDuracion, 0);
+});
+
+console.log('\n── Falsos positivos de la repetición interna, buscados a propósito ──');
+
+comprobar('"very very very very good" es habla, no alucinación', () => {
+  // La primera versión marcaba cualquier bloque de 1 palabra repetido 4
+  // veces. Eso es insistencia humana corriente.
+  for (const t of [
+    'very very very very good',
+    'no no no no no',
+    'ha ha ha ha ha ha',
+    'I I I I think so',
+    'and it was really really really important to them at the time'
+  ]) {
+    assert.equal(esRepeticionInternaPatologica(repeticionInterna(t)), false, t);
+    assert.equal(analizarTrozos([t], { segundosAudio: 12.03 }).esSospechosa, false, t);
+  }
+});
+
+comprobar('un bucle de FRASE sí se sigue cazando', () => {
+  for (const t of [
+    'it is interesting it is interesting it is interesting it is interesting',
+    'thank you thank you thank you thank you thank you'
+  ]) {
+    assert.equal(esRepeticionInternaPatologica(repeticionInterna(t)), true, t);
+  }
+});
+
+comprobar('una palabra repetida MUCHO sí es un bucle', () => {
+  const t = Array(12).fill('yeah').join(' ');
+  assert.equal(esRepeticionInternaPatologica(repeticionInterna(t)), true);
+});
+
+comprobar('un inciso repetido dentro de una oración larga NO se toca', () => {
+  // Cobertura: el bloque repetido tiene que ocupar la mayor parte del
+  // trozo. Tres palabras repetidas dentro de treinta son habla.
+  const t =
+    'so the committee decided that we should move forward move forward move forward ' +
+    'with the plan that had been discussed during the previous meeting in the spring';
+  assert.equal(esRepeticionInternaPatologica(repeticionInterna(t)), false);
 });
 
 console.log(`\n${hechas} comprobaciones correctas.\n`);

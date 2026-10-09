@@ -120,6 +120,20 @@ const PROPORCION_CORTE = 4;
 const PALABRAS_BLOQUE_MAXIMO = 8; // bloques de hasta 8 palabras
 const REPETICIONES_INTERNAS_MAXIMAS = 3; // igual que entre trozos
 
+// REVISADO EL 8-OCT POR LA NOCHE, buscando falsos positivos antes de que los
+// encuentre Anderson. La primera versión miraba bloques de UNA palabra con
+// el mismo listón de 3, y eso marca habla perfectamente legítima:
+//
+//   "very very very very good"      "no no no no no"      "ha ha ha ha"
+//
+// Un bucle de Whisper repite FRASES, no palabras sueltas. Así que:
+//   · con bloques de 1 palabra hace falta mucha más insistencia;
+//   · y en cualquier caso el bloque repetido tiene que ocupar la mayor parte
+//     del trozo. Un tartamudeo de tres palabras dentro de una oración larga
+//     es habla, no alucinación.
+const REPETICIONES_INTERNAS_UNA_PALABRA = 8;
+const COBERTURA_INTERNA_MINIMA = 0.6;
+
 // Proporción máxima que puede ocupar UNA sola oración dentro de la frase.
 //
 // Esto caza la repetición NO SEGUIDA, que los otros dos criterios dejan
@@ -147,6 +161,22 @@ export function segundosDeHabla(caracteres) {
  * null. Se prueban bloques de 1 a PALABRAS_BLOQUE_MAXIMO palabras y se queda
  * con el que más terreno cubre, que es el que de verdad infla la frase.
  */
+/**
+ * ¿Esta repetición interna es un bucle del modelo o es habla?
+ *
+ * Separado de repeticionInterna() a propósito: una cosa es ENCONTRAR la
+ * repetición y otra decidir que es patológica. La segunda es la que puede
+ * hacer daño, así que va sola y se prueba sola.
+ */
+export function esRepeticionInternaPatologica(r) {
+  if (!r) return false;
+  const minimo =
+    r.palabras === 1 ? REPETICIONES_INTERNAS_UNA_PALABRA : REPETICIONES_INTERNAS_MAXIMAS;
+  if (r.veces <= minimo) return false;
+  // Y tiene que ocupar la mayor parte del trozo, no ser un inciso.
+  return r.cubre >= r.total * COBERTURA_INTERNA_MINIMA;
+}
+
 export function repeticionInterna(trozo) {
   const palabras = normalizar(trozo).split(' ').filter(Boolean);
   let mejor = null;
@@ -163,7 +193,7 @@ export function repeticionInterna(trozo) {
       if (veces < 2) continue;
       const cubre = veces * k;
       if (!mejor || cubre > mejor.cubre || (cubre === mejor.cubre && veces > mejor.veces)) {
-        mejor = { bloque, palabras: k, veces, desde: inicio, cubre };
+        mejor = { bloque, palabras: k, veces, desde: inicio, cubre, total: palabras.length };
       }
     }
     // Si ya hemos encontrado algo que cubre casi todo, no hace falta seguir.
@@ -224,7 +254,13 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
     if (seguidas > repeticionSeguidaMaxima) repeticionSeguidaMaxima = seguidas;
   }
 
-  const segundos = segundosAudio || SEGUNDOS_MAXIMOS_DE_FRASE;
+  // Si no nos han dado la duración del audio NO se inventa. Para describir
+  // (oraciones por segundo) se usa el tope del VAD como referencia; para
+  // DECIDIR, los criterios que dependen del tiempo se callan. Es la
+  // diferencia entre estimar y suponer, y el 8-oct costó cuatro falsos
+  // positivos no tenerla clara.
+  const hayDuracion = typeof segundosAudio === 'number' && segundosAudio > 0;
+  const segundos = hayDuracion ? segundosAudio : SEGUNDOS_MAXIMOS_DE_FRASE;
   const oracionesPorSegundo = Number((total / segundos).toFixed(2));
 
   // Oración más repetida, estén o no sus repeticiones seguidas.
@@ -244,13 +280,15 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
   // el único que habría cazado la fila #23 (8 trozos, 92 s de voz).
   const caracteres = lista.join(' ').length;
   const segundosHablaEstimados = Number(segundosDeHabla(caracteres).toFixed(1));
-  const proporcionEstimada = Number((segundosHablaEstimados / segundos).toFixed(2));
+  const proporcionEstimada = hayDuracion
+    ? Number((segundosHablaEstimados / segundos).toFixed(2))
+    : null;
 
   // Repetición dentro de un mismo trozo: el caso que el troceo no ve.
   let peorInterna = null;
   for (const trozo of lista) {
     const r = repeticionInterna(trozo);
-    if (r && r.veces > REPETICIONES_INTERNAS_MAXIMAS && (!peorInterna || r.veces > peorInterna.veces)) {
+    if (esRepeticionInternaPatologica(r) && (!peorInterna || r.veces > peorInterna.veces)) {
       peorInterna = r;
     }
   }
@@ -270,7 +308,7 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
   if (repeticionSeguidaMaxima > REPETICIONES_SEGUIDAS_MAXIMAS) {
     motivos.push(`la misma oración ${repeticionSeguidaMaxima} veces seguidas.`);
   }
-  if (proporcionEstimada > PROPORCION_AVISO) {
+  if (hayDuracion && proporcionEstimada > PROPORCION_AVISO) {
     motivos.push(
       `son unos ${segundosHablaEstimados} s de voz para ${segundos} s de audio ` +
         `(${proporcionEstimada}x; lo medido con habla real es 1,11x).`
@@ -313,7 +351,7 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
     superaElTopeDuro:
       total > TROZOS_MAXIMOS ||
       repeticionSeguidaMaxima > REPETICIONES_SEGUIDAS_MAXIMAS ||
-      proporcionEstimada > PROPORCION_CORTE ||
+      (hayDuracion && proporcionEstimada > PROPORCION_CORTE) ||
       Boolean(peorInterna),
     motivos
   };
@@ -377,7 +415,7 @@ export function sanearTrozos(trozos, { topeDuro = TROZOS_MAXIMOS, segundosAudio 
   let quitadosPorRepeticionInterna = 0;
   const sinRepetirDentro = sinRepetir.map((trozo) => {
     const r = repeticionInterna(trozo);
-    if (!r || r.veces <= REPETICIONES_INTERNAS_MAXIMAS) return trozo;
+    if (!esRepeticionInternaPatologica(r)) return trozo;
     const palabras = String(trozo).split(/\s+/).filter(Boolean);
     const sobran = (r.veces - REPETICIONES_INTERNAS_MAXIMAS) * r.palabras;
     quitadosPorRepeticionInterna += sobran;
