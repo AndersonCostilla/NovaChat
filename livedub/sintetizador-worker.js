@@ -314,6 +314,10 @@ let cadena = Promise.resolve();
 // oraciones, que es donde está casi todo el tiempo de una frase larga.
 const cancelados = new Set();
 
+// Cuántas cancelaciones se recuerdan. Un Set que sólo crece en un worker que
+// vive toda la sesión es una fuga, aunque sea barata.
+const CANCELACIONES_RECORDADAS = 200;
+
 function estaCancelado(id) {
   return id !== undefined && id !== null && cancelados.has(id);
 }
@@ -326,6 +330,16 @@ self.onmessage = (evento) => {
   if (mensaje.type === ENTRADA.CANCELAR) {
     if (mensaje.id !== undefined && mensaje.id !== null) {
       cancelados.add(mensaje.id);
+      // FUGA PEQUEÑA PERO REAL (8-oct-2026). Si la cancelación llega cuando
+      // la frase YA había terminado, nadie la borra nunca de aquí: el Set
+      // crece durante toda la sesión. Son números, así que no explica una
+      // degradación de x4 — pero un conjunto que sólo crece en un worker que
+      // dura horas no se deja pasar. Se acota a las últimas CANCELACIONES_
+      // RECORDADAS: cancelar algo de hace 200 frases no tiene sentido.
+      if (cancelados.size > CANCELACIONES_RECORDADAS) {
+        const viejo = cancelados.values().next().value;
+        cancelados.delete(viejo);
+      }
       console.warn(`${LOG} cancelación recibida para #${mensaje.id}`);
     }
     return;

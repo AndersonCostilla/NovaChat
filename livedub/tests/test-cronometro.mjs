@@ -746,6 +746,65 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
   });
 }
 
+
+/* ------------------------------------------------------------------ */
+/* deriva(): ¿el sistema se degrada con el tiempo?                     */
+/* ------------------------------------------------------------------ */
+{
+  // Sesión sintética: n frases, con el coste de Whisper que se le diga.
+  const sesion = (n, msWhisper, segundosAudio = () => 5) => {
+    let t = 0;
+    const c = crearCronometro({ ahora: () => t });
+    for (let i = 1; i <= n; i++) {
+      t += 1000;
+      c.abrir(i, { tInicioHabla: t - 5000, segundosAudio: segundosAudio(i, n), motivoCierre: 'silencio' });
+      t += msWhisper(i, n);
+      c.marcar(i, 'tFinAsr');
+      t += 2000;
+      c.marcar(i, 'tFinMt');
+      c.cerrar(i, { motivoFinal: 'doblada' });
+    }
+    return c;
+  };
+
+  comprobar('con pocas frases NO inventa un veredicto', () => {
+    const d = sesion(5, () => 4000).deriva();
+    assert.match(d['¿se puede responder?'], /^NO/);
+  });
+
+  comprobar('máquina estable: dice que NO hay deriva', () => {
+    const d = sesion(30, () => 4000).deriva();
+    assert.match(d['¿se degrada con el tiempo?'], /^NO/);
+    assert.equal(d.tramos.length, 3);
+  });
+
+  comprobar('el caso de Anderson (3-5 s → 16-25 s) SÍ se detecta', () => {
+    const d = sesion(30, (i, n) => (i > (2 * n) / 3 ? 20000 : 4000)).deriva();
+    assert.match(d['¿se degrada con el tiempo?'], /^SÍ/);
+    assert.match(d['¿se degrada con el tiempo?'], /x5/);
+    assert.equal(d.tramos[0]['Whisper mediana (ms)'], 4000);
+    assert.equal(d.tramos[2]['Whisper mediana (ms)'], 20000);
+  });
+
+  comprobar('no confunde "frases más largas" con degradación', () => {
+    // Whisper sube x5 pero las frases también se han alargado mucho.
+    const d = sesion(
+      30,
+      (i, n) => (i > (2 * n) / 3 ? 20000 : 4000),
+      (i, n) => (i > (2 * n) / 3 ? 12 : 3)
+    ).deriva();
+    assert.match(d['¿se degrada con el tiempo?'], /^OJO/);
+  });
+
+  comprobar('el grupo MT más caro llega a la tabla y a la deriva', () => {
+    const c = crearCronometro();
+    c.abrir(3, { tInicioHabla: 0, segundosAudio: 12.03, motivoCierre: 'tope' });
+    c.anotarGrupos(3, [4200, 11840, 3900]);
+    c.cerrar(3, { motivoFinal: 'doblada' });
+    assert.equal(c.filas()[0]['grupo MT más caro (ms)'], 11840);
+  });
+}
+
 console.log(`\n==========================================================`);
 console.log(`Resultado: ${pasadas} pasadas, ${fallidas} fallidas`);
 console.log(`==========================================================`);

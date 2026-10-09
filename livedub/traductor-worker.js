@@ -57,13 +57,27 @@ const TOKENS_MAXIMOS = 512;
 
 // Cuántas oraciones van en cada llamada a generate().
 //
-// El número sale de medir, no de elegir: con habla real, segmentador.js
-// devuelve 1-2 trozos por frase, y una frase tope de 12,03 s a ritmo normal
-// no pasa de 3-4 oraciones. Con 8, el troceo NO SE ACTIVA NUNCA con habla
-// legítima — sólo sobre las alucinaciones repetitivas, que es justo lo que
-// se quiere acotar. Por debajo de 8 se empezaría a trocear habla normal y se
-// perdería el ahorro de agrupar sin ganar nada a cambio.
-const TROZOS_POR_GRUPO = 8;
+// 8-oct-2026, SEGUNDA VUELTA. Estaba en 8 y el razonamiento era "con 8 el
+// troceo no se activa nunca con habla legítima". Eso era cierto y, aun así,
+// el número estaba mal, porque pasaba por alto lo esencial:
+//
+//   EL TAMAÑO DEL GRUPO ES LA RESOLUCIÓN DEL PRESUPUESTO.
+//
+// generate() no se puede interrumpir. El presupuesto sólo se puede mirar
+// ENTRE grupos. Así que el tiempo máximo que esta frase puede ocupar el
+// worker sin que nadie pueda hacer nada no es PRESUPUESTO_MS: es
+// "lo que tarde un grupo". Un presupuesto de 12 s comprobado cada 8
+// oraciones no es un presupuesto de 12 s.
+//
+// Lo demostró la frase #3 en producción: 12 trozos, o sea 8 + 4. El primer
+// grupo de 8 se comió los 30 s enteros del orquestador. La comprobación del
+// presupuesto, que estaba en i = 8, NUNCA LLEGÓ A EJECUTARSE. El arreglo
+// anterior no falló: no llegó a entrar en juego.
+//
+// Con 3, una frase de habla real (1-2 trozos medidos, 3-4 en el peor caso)
+// sigue cabiendo en UN grupo, que era lo que se quería conservar; y el peor
+// caso de ceguera baja de 8 oraciones a 3.
+const TROZOS_POR_GRUPO = 3;
 
 // Tiempo máximo que esta frase puede ocupar el worker. Al terminar un grupo,
 // si se ha pasado, se devuelve lo traducido hasta ahí MARCADO COMO PARCIAL
@@ -270,6 +284,9 @@ async function traducir({ id, texto }) {
   // que antes, misma llamada y mismo coste.
   const lista = [];
   let abandonadoEn = -1;
+  // Duración de cada llamada a generate(), en orden. Es lo que permite
+  // distinguir "muchos grupos normales" de "un grupo atascado".
+  const grupos = [];
 
   for (let i = 0; i < entradas.length; i += TROZOS_POR_GRUPO) {
     // Punto de abandono 1: nos han cancelado mientras trabajábamos.
@@ -279,7 +296,8 @@ async function traducir({ id, texto }) {
     }
     // Punto de abandono 2: esta frase ya ha gastado su tiempo. Nunca antes
     // del primer grupo: toda frase tiene derecho a intentarse una vez.
-    if (i > 0 && performance.now() - inicio > PRESUPUESTO_MS) {
+    const transcurrido = performance.now() - inicio;
+    if (i > 0 && transcurrido > PRESUPUESTO_MS) {
       abandonadoEn = i;
       console.warn(
         `${LOG} frase #${id}: presupuesto de ${PRESUPUESTO_MS / 1000} s agotado tras ` +
@@ -288,10 +306,43 @@ async function traducir({ id, texto }) {
       break;
     }
 
+    // Punto de abandono 3: PREDICTIVO. Mirar sólo el tiempo ya gastado llega
+    // tarde — se puede estar a 11,9 s y entrar igual en un grupo que va a
+    // costar otros 20. Como ya sabemos lo que han costado los grupos
+    // anteriores de ESTA frase, en ESTE equipo y en ESTE momento (que es la
+    // única medida que vale cuando la máquina va degradada), se estima lo
+    // que costaría el siguiente y no se entra si no cabe.
+    const porTrozo = i > 0 ? transcurrido / i : 0;
+    const grupoQueViene = Math.min(TROZOS_POR_GRUPO, entradas.length - i);
+    const estimado = porTrozo * grupoQueViene;
+    if (i > 0 && transcurrido + estimado > PRESUPUESTO_MS) {
+      abandonadoEn = i;
+      console.warn(
+        `${LOG} frase #${id}: no se entra en el grupo ${grupos.length + 1} — ` +
+          `llevamos ${Math.round(transcurrido)} ms y ese grupo costaría unos ` +
+          `${Math.round(estimado)} ms más (${Math.round(porTrozo)} ms/trozo medidos aquí), ` +
+          `por encima del presupuesto de ${PRESUPUESTO_MS} ms. Se devuelve lo traducido.`
+      );
+      break;
+    }
+
+    const tGrupo = performance.now();
     const parte = await modelo(entradas.slice(i, i + TROZOS_POR_GRUPO), {
       max_new_tokens: maxTokens,
       num_beams: NUM_BEAMS
     });
+    const msGrupo = Math.round(performance.now() - tGrupo);
+    grupos.push(msGrupo);
+
+    // POR GRUPO, no sólo el total. Con el total no se puede saber si una
+    // traducción de 30 s fueron diez grupos normales o uno solo atascado, y
+    // esas dos cosas piden arreglos distintos.
+    console.log(
+      `${LOG} frase #${id}: grupo ${grupos.length} (trozos ${i + 1}-${i + grupoQueViene} ` +
+        `de ${entradas.length}) ${msGrupo} ms, ${Math.round(msGrupo / grupoQueViene)} ms/trozo, ` +
+        `acumulado ${Math.round(performance.now() - inicio)} ms.`
+    );
+
     lista.push(...(Array.isArray(parte) ? parte : [parte]));
 
     // CEDER EL TURNO. Esta línea es la que hace que todo lo anterior sirva
@@ -339,7 +390,10 @@ async function traducir({ id, texto }) {
     console.warn(`${LOG} frase #${id}: ${vacios} de ${trozos.length} trozos volvieron vacíos.`);
   }
 
-  console.log(`${LOG} frase #${id} traducida en ${duracionMs} ms (${trozos.length} trozo(s))`);
+  console.log(
+    `${LOG} frase #${id} traducida en ${duracionMs} ms (${trozos.length} trozo(s), ` +
+      `${grupos.length} grupo(s): ${grupos.join(' + ')} ms)`
+  );
 
   // Una traducción a medias NUNCA se entrega en silencio: va marcada, y
   // aguas arriba se cuenta como pérdida parcial y se avisa en el subtítulo.
@@ -358,7 +412,8 @@ async function traducir({ id, texto }) {
     trozosTraducidos: lista.length,
     parcial,
     terminosProtegidos: totalMarcas,
-    duracionMs
+    duracionMs,
+    grupos // ms de cada llamada a generate(), en orden
   });
 }
 
@@ -407,6 +462,10 @@ async function atender(mensaje) {
 let cadena = Promise.resolve();
 const cancelados = new Set();
 
+// Cuántas cancelaciones se recuerdan. Un Set que sólo crece en un worker que
+// vive toda la sesión es una fuga, aunque sea barata.
+const CANCELACIONES_RECORDADAS = 200;
+
 function estaCancelado(id) {
   return id !== undefined && id !== null && cancelados.has(id);
 }
@@ -419,6 +478,16 @@ self.onmessage = (evento) => {
   if (mensaje.type === ENTRADA.CANCELAR) {
     if (mensaje.id !== undefined && mensaje.id !== null) {
       cancelados.add(mensaje.id);
+      // FUGA PEQUEÑA PERO REAL (8-oct-2026). Si la cancelación llega cuando
+      // la frase YA había terminado, nadie la borra nunca de aquí: el Set
+      // crece durante toda la sesión. Son números, así que no explica una
+      // degradación de x4 — pero un conjunto que sólo crece en un worker que
+      // dura horas no se deja pasar. Se acota a las últimas CANCELACIONES_
+      // RECORDADAS: cancelar algo de hace 200 frases no tiene sentido.
+      if (cancelados.size > CANCELACIONES_RECORDADAS) {
+        const viejo = cancelados.values().next().value;
+        cancelados.delete(viejo);
+      }
       console.warn(`${LOG} cancelación recibida para #${mensaje.id}`);
     }
     return;

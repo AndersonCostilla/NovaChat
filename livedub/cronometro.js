@@ -136,7 +136,10 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       // para calcular el ritmo real de habla de esta frase.
       traduccionHablada: null,
       trozosAsr: null,
-      sospechosaAlucinacion: false
+      sospechosaAlucinacion: false,
+      // ms de cada llamada a generate() de esta frase, en orden. Con el
+      // total solo no se distingue "muchos grupos normales" de "uno atascado".
+      gruposMt: null
     });
   }
 
@@ -163,6 +166,14 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    * marcar(): es un dato de configuración, no de instante.
    */
   /** Diagnóstico de alucinación de esta frase (describe, no decide). */
+  /** Duración de cada grupo de generate() de esta frase. */
+  function anotarGrupos(id, grupos) {
+    const f = vivas.get(id);
+    if (!f || !Array.isArray(grupos) || !grupos.length) return false;
+    f.gruposMt = grupos;
+    return true;
+  }
+
   function anotarAlucinacion(id, diagnostico) {
     const f = vivas.get(id);
     if (!f) return false;
@@ -233,6 +244,9 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
         // explican una traducción desbocada.
         'trozos MT': f.trozosMt,
         '¿alucinación?': f.sospechosaAlucinacion ? 'SOSPECHOSA' : '',
+        // El grupo más caro de la frase. Es el tiempo durante el cual el
+        // worker estuvo ciego y sordo: ni cancelación ni presupuesto.
+        'grupo MT más caro (ms)': f.gruposMt ? Math.max(...f.gruposMt) : null,
         // El dato que vuelve interpretable cualquier tanda, incluso una en
         // la que se tocara el interruptor a mitad.
         recorte: f.recorteActivo === null ? '?' : f.recorteActivo ? 'on' : 'off',
@@ -747,6 +761,86 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     };
   }
 
+  /**
+   * ¿El sistema se degrada con el tiempo?
+   *
+   * Anderson lo describió así: "después de un tiempo empieza a hacer así".
+   * En la sesión del fallo, Whisper pasó de 3-5 s a 16-25 s. Eso es un
+   * factor 4-5 sobre un trabajo que es MAYORMENTE FIJO (chunk_length_s: 30,
+   * Whisper rellena hasta 30 s pase lo que pase), así que no puede
+   * explicarse porque las frases se hicieran más largas.
+   *
+   * Esta función no adivina la causa: la hace visible. Parte la sesión en
+   * tres tercios por orden de llegada y compara las medianas. Si el primer
+   * tercio y el último se parecen, no hay deriva y hay que buscar en otro
+   * sitio; si el último es varias veces el primero, la hay.
+   *
+   * NOTA: esto sólo es medible desde que el historial guarda 200 frases.
+   * Con el tope anterior de 40, el primer tercio de una sesión larga ya se
+   * había borrado cuando se iba a mirar.
+   */
+  function deriva() {
+    const n = historial.length;
+    if (n < 9) {
+      return {
+        '¿se puede responder?': `NO — hacen falta al menos 9 frases y hay ${n}.`
+      };
+    }
+
+    const corte = Math.floor(n / 3);
+    const tercios = [
+      { nombre: 'primer tercio', frases: historial.slice(0, corte) },
+      { nombre: 'tercio central', frases: historial.slice(corte, n - corte) },
+      { nombre: 'último tercio', frases: historial.slice(n - corte) }
+    ];
+
+    const ms = (a, b) => (a !== null && b !== null ? b - a : null);
+    const tabla = tercios.map(({ nombre, frases }) => ({
+      tramo: nombre,
+      frases: frases.length,
+      // El trabajo de entrada: si esto crece, la culpa no es de la máquina.
+      'duración frase mediana (s)': mediana(frases.map((f) => f.segundosAudio)),
+      'trozos MT mediana': mediana(frases.map((f) => f.trozosMt)),
+      // El coste. Whisper es el testigo limpio: su trabajo es casi fijo.
+      'Whisper mediana (ms)': mediana(frases.map((f) => ms(f.tFinHabla, f.tFinAsr))),
+      'traducción mediana (ms)': mediana(frases.map((f) => ms(f.tFinAsr, f.tFinMt))),
+      'grupo MT más caro (ms)': Math.max(
+        0,
+        ...frases.map((f) => (f.gruposMt ? Math.max(...f.gruposMt) : 0))
+      ),
+      'pérdidas': frases.filter((f) => f.motivoFinal && f.motivoFinal !== 'doblada').length
+    }));
+
+    const primero = tabla[0]['Whisper mediana (ms)'];
+    const ultimo = tabla[2]['Whisper mediana (ms)'];
+    const factor = primero && ultimo ? Number((ultimo / primero).toFixed(2)) : null;
+
+    const entradaCrecio =
+      tabla[0]['duración frase mediana (s)'] &&
+      tabla[2]['duración frase mediana (s)'] > tabla[0]['duración frase mediana (s)'] * 1.3;
+
+    let veredicto;
+    if (factor === null) veredicto = 'NO SE SABE — falta el tiempo de Whisper en alguno de los tercios.';
+    else if (factor < 1.3) veredicto = `NO — Whisper va x${factor} al final. Eso es ruido, no deriva.`;
+    else if (entradaCrecio)
+      veredicto =
+        `OJO — Whisper va x${factor}, pero las frases TAMBIÉN se alargaron. ` +
+        'Parte del aumento es trabajo de más, no degradación.';
+    else
+      veredicto =
+        `SÍ — Whisper va x${factor} al final sobre el mismo trabajo de entrada. ` +
+        'Eso es degradación, no frases más largas.';
+
+    return {
+      '¿se degrada con el tiempo?': veredicto,
+      tramos: tabla,
+      'cómo leer esto':
+        'Whisper es el testigo limpio: su coste es casi fijo (chunk_length_s = 30), ' +
+        'así que si su mediana se multiplica sin que crezca la duración de las frases, ' +
+        'lo que se ha degradado es la máquina, no la entrada.'
+    };
+  }
+
   function resumenPerdidas() {
     const porEtapa = {};
     let segundosTotales = 0;
@@ -789,6 +883,8 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     anotarLote,
     anotarRecorte,
     anotarAlucinacion,
+    anotarGrupos,
+    deriva,
     anotarPerdida,
     resumenPerdidas,
     verificacionCruzada,

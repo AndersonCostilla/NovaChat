@@ -220,7 +220,12 @@ bloque('El worker recibe una CANCELACIÓN de verdad, no solo se le ignora');
   comprobar('el worker responde con SALIDA.CANCELADO', /CANCELADO: 'CANCELADO'/.test(fuente));
   comprobar(
     'CANCELAR se atiende FUERA de la cadena (si no, llegaría tarde)',
-    /if \(mensaje\.type === ENTRADA\.CANCELAR\)[\s\S]{0,400}?return;/.test(fuente)
+    // Sin comentarios: lo que importa es el CÓDIGO que hay entre el if y el
+    // return. Midiendo sobre el fuente bruto, añadir un comentario largo
+    // dentro del bloque tumbaba la comprobación sin que nada se rompiera.
+    /if \(mensaje\.type === ENTRADA\.CANCELAR\)[\s\S]{0,400}?return;/.test(
+      fuente.replace(/^\s*\/\/.*$/gm, '').replace(/\/\*[\s\S]*?\*\//g, '')
+    )
   );
   comprobar('el worker abandona entre oraciones', /if \(estaCancelado\(id\)\)/.test(fuente));
   await p;

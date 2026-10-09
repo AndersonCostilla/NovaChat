@@ -29,6 +29,29 @@
 // No es un parámetro de este archivo, es un hecho del VAD.
 const SEGUNDOS_MAXIMOS_DE_FRASE = 12.03;
 
+// HAY DOS UMBRALES DISTINTOS, Y ES A PROPÓSITO.
+//
+// Avisar es gratis y reversible: si me equivoco, sale una línea de más en la
+// consola. Cortar descarta contenido: si me equivoco, el usuario se pierde
+// algo y no se entera. No tiene ningún sentido que los dos usen el mismo
+// número. El de aviso puede y debe ser más estricto.
+//
+//   TROZOS_AVISO   =  8  → a partir de aquí se avisa
+//   TROZOS_MAXIMOS = 15  → a partir de aquí se corta (si el tope está activo)
+//
+// Umbral de AVISO.
+//
+// 8-oct-2026, tarde: la frase #3 trajo 12 trozos en 12,03 s y el detector NO
+// la marcó, porque 12 < 15. Y 12 oraciones en 12 s es una oración por
+// segundo sostenida: no es habla.
+//
+// El número sale de los datos que ya tenemos: segmentador.js da 1-2 trozos
+// por frase con habla real, y 3-4 en el peor caso de una frase tope a ritmo
+// rápido. 8 es el DOBLE del peor caso observado — margen de sobra— y son
+// 1,5 s por oración sostenidos, que ya está por debajo de lo que dura una
+// oración hablada corta.
+export const TROZOS_AVISO = 8;
+
 // Tope duro de oraciones por frase.
 //
 // JUSTIFICACIÓN, no es un número elegido a ojo: 15 oraciones en 12,03 s son
@@ -55,6 +78,14 @@ const RATIO_UNICOS_MINIMO = 0.4;
 // Cuántas veces seguidas puede repetirse literalmente la misma oración.
 // Tres es insistencia humana ("No. No. No."). Cuatro ya no.
 const REPETICIONES_SEGUIDAS_MAXIMAS = 3;
+
+// Proporción máxima que puede ocupar UNA sola oración dentro de la frase.
+//
+// Esto caza la repetición NO SEGUIDA, que los otros dos criterios dejan
+// pasar: "A. B. A. C. A. D. A. E." tiene ratio de únicos 0,63 (por encima de
+// 0,4) y nunca repite dos veces seguidas, pero la mitad de la frase es la
+// misma oración. Whisper también alucina así, alternando.
+const DOMINANCIA_MAXIMA = 0.5;
 
 /* ------------------------------------------------------------------ */
 /* Análisis                                                            */
@@ -88,8 +119,11 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
     unicos: total,
     ratioUnicos: 1,
     repeticionSeguidaMaxima: total ? 1 : 0,
+    repeticionTotalMaxima: total ? 1 : 0,
+    dominancia: total ? 1 : 0,
     oracionesPorSegundo: null,
     esSospechosa: false,
+    superaElTopeDuro: false,
     motivos: []
   };
   if (total === 0) return base;
@@ -108,11 +142,24 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
   const segundos = segundosAudio || SEGUNDOS_MAXIMOS_DE_FRASE;
   const oracionesPorSegundo = Number((total / segundos).toFixed(2));
 
+  // Oración más repetida, estén o no sus repeticiones seguidas.
+  const cuentas = new Map();
+  for (const n of normalizados) cuentas.set(n, (cuentas.get(n) || 0) + 1);
+  let repeticionTotalMaxima = 0;
+  let oracionDominante = '';
+  for (const [texto, veces] of cuentas) {
+    if (veces > repeticionTotalMaxima) {
+      repeticionTotalMaxima = veces;
+      oracionDominante = texto;
+    }
+  }
+  const dominancia = repeticionTotalMaxima / total;
+
   const motivos = [];
-  if (total > TROZOS_MAXIMOS) {
+  if (total > TROZOS_AVISO) {
     motivos.push(
       `${total} oraciones en ${segundos} s (${oracionesPorSegundo} por segundo). ` +
-        `El tope plausible son ${TROZOS_MAXIMOS}.`
+        `Con habla real son 1-2, y 3-4 en el peor caso; a partir de ${TROZOS_AVISO} no es habla.`
     );
   }
   if (total >= MINIMO_PARA_EVALUAR && ratioUnicos < RATIO_UNICOS_MINIMO) {
@@ -123,14 +170,31 @@ export function analizarTrozos(trozos, { segundosAudio = null } = {}) {
   if (repeticionSeguidaMaxima > REPETICIONES_SEGUIDAS_MAXIMAS) {
     motivos.push(`la misma oración ${repeticionSeguidaMaxima} veces seguidas.`);
   }
+  if (
+    total >= MINIMO_PARA_EVALUAR &&
+    dominancia > DOMINANCIA_MAXIMA &&
+    repeticionSeguidaMaxima <= REPETICIONES_SEGUIDAS_MAXIMAS
+  ) {
+    // Sólo se dice si no lo ha dicho ya el criterio de repetición seguida:
+    // si no, la misma alucinación saldría descrita dos veces.
+    motivos.push(
+      `"${oracionDominante}" ocupa ${repeticionTotalMaxima} de ${total} oraciones ` +
+        `(${Math.round(dominancia * 100)} %), aunque no seguidas.`
+    );
+  }
 
   return {
     total,
     unicos,
     ratioUnicos: Number(ratioUnicos.toFixed(3)),
     repeticionSeguidaMaxima,
+    repeticionTotalMaxima,
+    dominancia: Number(dominancia.toFixed(3)),
     oracionesPorSegundo,
     esSospechosa: motivos.length > 0,
+    // ¿Hay además motivo para CORTAR, y no sólo para avisar? Es un umbral
+    // aparte y mucho más alto: sanearTrozos() nunca toca nada por debajo.
+    superaElTopeDuro: total > TROZOS_MAXIMOS || repeticionSeguidaMaxima > REPETICIONES_SEGUIDAS_MAXIMAS,
     motivos
   };
 }

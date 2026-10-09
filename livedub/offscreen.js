@@ -621,6 +621,7 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
 
     traduccion = resultado.traduccion || '';
     duracionTraduccionMs = resultado.duracionMs || 0;
+    cronometro.anotarGrupos(id, resultado.grupos);
 
     // PARCIAL: el worker agotó su presupuesto y devolvió lo que llevaba.
     // Suena lo traducido, pero el resto de la frase no se dobla, así que se
@@ -1130,6 +1131,17 @@ globalThis.livedub = {
   },
 
   // Qué contenido se ha perdido y dónde. Uso: livedub.perdidas()
+  /**
+   * ¿Se degrada el sistema con el tiempo? Parte la sesión en tres tercios y
+   * compara. Uso: livedub.deriva()
+   */
+  deriva: () => {
+    const d = cronometro.deriva();
+    console.log(d['¿se degrada con el tiempo?'] ?? d['¿se puede responder?']);
+    if (d.tramos) console.table(d.tramos);
+    return d;
+  },
+
   perdidas: () => {
     const r = cronometro.resumenPerdidas();
     if (!r['frases perdidas']) {

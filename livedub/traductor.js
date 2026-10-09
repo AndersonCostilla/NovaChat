@@ -28,11 +28,22 @@ const MAX_EN_COLA = 4; // traducir texto es rápido; aguanta más cola que Whisp
 // sigue ocupado mete dos generate() a la vez en el mismo núcleo y va PEOR.
 //
 // CÓMO SE ARREGLA DE VERDAD. Dándole al worker puntos donde pueda parar.
-// traductor-worker.js traduce ahora por grupos de 8 oraciones, cede el turno
-// entre grupo y grupo y se autoimpone un presupuesto de 12 s, al cabo del
-// cual devuelve lo que lleve marcado como PARCIAL. Con eso el worker se
-// libera solo y estos dos temporizadores pasan a ser lo que siempre
-// debieron ser: una red de seguridad que casi nunca se usa.
+// traductor-worker.js traduce por grupos, cede el turno entre grupo y grupo
+// y se autoimpone un presupuesto de 12 s, al cabo del cual devuelve lo que
+// lleve marcado como PARCIAL.
+//
+// SEGUNDA VUELTA (8-oct-2026, tarde): el episodio VOLVIÓ. Frase #3, 12
+// trozos, traducción 30002 ms → tiempo agotado, y detrás la cascada de
+// siempre. El arreglo no falló: NO LLEGÓ A ENTRAR EN JUEGO. Con grupos de 8,
+// 12 trozos son 8 + 4, y la única comprobación del presupuesto estaba
+// DESPUÉS del primer grupo. Ese primer grupo de 8 se comió los 30 s él solo.
+// El presupuesto nunca se miró ni una vez.
+//
+// La lección, que conviene no volver a olvidar: el tamaño del grupo es la
+// RESOLUCIÓN del presupuesto. Grupos de 8 con presupuesto de 12 s = ningún
+// presupuesto. Ahora los grupos son de 3 y además hay una comprobación
+// predictiva (no se entra en un grupo que, al ritmo medido en esta misma
+// frase, no vaya a caber).
 const TIMEOUT_MS = 30000; // 30 s por frase: si no, se da por perdida
 
 // Vigilante de carga. El modelo está en disco (unos 113 MB): cargarlo son
@@ -46,7 +57,7 @@ const TIMEOUT_CARGA_MS = 90000;
 // Antes eran 20 s, elegidos cuando el worker podía tardar lo que quisiera en
 // reaccionar. Ya no: con los puntos de abandono, lo máximo que puede tardar
 // en atender un CANCELAR es lo que dure el grupo que tiene entre manos. Se
-// deja en 15 s, que es holgado para un grupo de 8 oraciones, y así el peor
+// deja en 15 s, que es holgado para un grupo de 3 oraciones, y así el peor
 // caso de tubería parada baja de 50 s a 45 s en el único escenario que queda
 // vivo: una sola oración que por sí sola tarde más de 30 s. Ese caso no se
 // puede trocear más, y por eso el rescate sigue existiendo.
@@ -194,7 +205,8 @@ export function crearTraductor({ onEstado, onActividad, onError, onTrabajo } = {
           duracionMs: mensaje.duracionMs,
           trozos: mensaje.trozos, // nº de oraciones en que se partió la frase
           trozosTraducidos: mensaje.trozosTraducidos ?? mensaje.trozos,
-          parcial: Boolean(mensaje.parcial)
+          parcial: Boolean(mensaje.parcial),
+          grupos: mensaje.grupos ?? [] // ms por llamada a generate()
         });
         procesarCola();
         break;

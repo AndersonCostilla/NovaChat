@@ -58,13 +58,33 @@ no sabe lo que está cortando.
 
 En `detector-alucinacion.js`. Tres criterios, cada uno con su aritmética:
 
-**a) Densidad imposible — `TROZOS_MAXIMOS = 15`.**
-15 oraciones en 12,03 segundos son **0,80 segundos por oración, sostenidos
-durante toda la frase**. El habla real no cabe ahí: una oración corta
-pronunciada ya ronda el segundo, y lo normal son 2-4. Por eso este tope
-**no puede recortar habla real** — para disparar haría falta que alguien
-hablara más rápido de lo que es físicamente posible, doce segundos seguidos.
-La #57 iba a **9,23 oraciones por segundo**.
+**a) Densidad imposible — `TROZOS_AVISO = 8`.**
+
+> **Revisado el 8-oct-2026 por la tarde.** Estaba en 15 y **se le escapó la
+> frase #3**: 12 trozos, 12 < 15, no avisó, y esa traducción se comió 30 s y
+> arrastró ocho frases. 12 oraciones en 12,03 s es **una oración por segundo
+> sostenida**: no es habla.
+
+Ahora hay **dos umbrales distintos, y es a propósito**:
+
+| | valor | qué provoca | si me equivoco |
+|---|---|---|---|
+| `TROZOS_AVISO` | **8** | una línea en la consola | una línea de más |
+| `TROZOS_MAXIMOS` | **15** | se descarta texto (sólo con el tope activo) | **el usuario pierde algo y no se entera** |
+
+No tiene ningún sentido que los dos usen el mismo número. Avisar es gratis y
+reversible; cortar no lo es. **Por eso bajar la detección es seguro: el corte
+no se ha movido.** Una frase como la #3 ahora avisa, y aun con el tope
+encendido no se le quitaría ni un carácter (12 < 15, y sus 12 oraciones son
+todas distintas).
+
+- **8** son 1,5 s por oración sostenidos, y es **el doble del peor caso de
+  habla real medido** (`segmentador.js` da 1-2 trozos por frase; 3-4 en una
+  frase tope a ritmo rápido).
+- **15** son 0,80 s por oración. Ahí el habla real ya no cabe de ninguna
+  manera, que es exactamente lo que se le pide a un umbral que corta.
+
+La #57 iba a **9,23 oraciones por segundo**; la #3, a **1,00**.
 
 **b) Poca variedad — `RATIO_UNICOS_MINIMO = 0,4`.**
 Si menos del 40 % de las oraciones son distintas, es un bucle. La #57 daba
@@ -74,6 +94,14 @@ Si menos del 40 % de las oraciones son distintas, es un bucle. La #57 daba
 Tres veces seguidas es insistencia humana («No. No. No. No lo voy a hacer.»);
 cuatro ya no. Por eso el saneador **conserva hasta tres copias** en vez de
 dejar una sola: desduplicar a una habría cambiado una frase legítima.
+
+**d) Repetición NO seguida — `DOMINANCIA_MAXIMA = 0,5`** *(nuevo, 8-oct tarde)*.
+Whisper también alucina **alternando**: «A. B. A. C. A. D. A. E.» tiene un
+ratio de únicos de 0,63 (por encima del 0,4) y no repite dos veces seguidas
+nunca, así que **los dos criterios anteriores la dejaban pasar entera** — y
+sin embargo la mitad de la frase es la misma oración. Ahora se mira también
+qué proporción ocupa la oración más frecuente, estén o no sus repeticiones
+juntas.
 
 Y una guarda: con **menos de 6 oraciones** no se evalúa nada. «Sí. Sí.» no
 puede ser sospechoso de nada.
@@ -108,7 +136,8 @@ livedub.toparAlucinaciones(true)    // enciende el recorte
 livedub.toparAlucinaciones(false)   // lo apaga
 ```
 
-**Por defecto está APAGADO**, igual que el recorte de traducciones. Apagado,
+**Sigue APAGADO**, y en este encargo **no se ha tocado**: lo que ha cambiado
+es sólo la detección. **Por defecto está APAGADO**, igual que el recorte de traducciones. Apagado,
 el detector **sigue funcionando y sigue avisando** por consola:
 
 ```
@@ -133,3 +162,14 @@ columna `¿alucinación?`.
   `tests/test-detector-alucinacion.mjs`, con la #57 reproducida exactamente y
   cinco muestras de habla normal que el detector deja intactas. La prueba de
   verdad es tu equipo, sobre un vídeo con música o silencios largos.
+
+
+---
+
+## 7. Congelado hasta nuevo aviso
+
+`simularRecorte()` y la comparación del recorte on/off siguen **congelados**,
+y con razón: no tiene sentido medir un ahorro del 3 % en una sesión en la que
+un fallo se lleva el 47 %. Se retoman cuando una tanda de 5 minutos cumpla
+las dos condiciones que pusiste: **el contador cuadra** y **no hay eventos
+catastróficos**.
