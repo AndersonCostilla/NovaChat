@@ -91,6 +91,33 @@ que es por donde hay que mirar aunque el veredicto salga tibio.
 **Lo que esto mide es una correlación dentro de una sesión. No prueba la
 causa**, y el propio informe lo dice.
 
+### Corrección del 9-oct (tanda 4): la herramienta se autolimita
+
+Dos fallos de diseño, descubiertos al usarla:
+
+**1. Informaba con un ajuste inservible.** En la tanda 4 el R² fue **0** y
+`contencion()` siguió publicando una columna llamada «esperado por su
+texto». Con R² = 0 esa predicción es poco más que **la media de la sesión**,
+así que «de más» no significaba «se desvió de lo que su texto justifica»
+sino «es más lenta que la media». Corregido: por debajo de **R² = 0,3** la
+herramienta **se calla** y remite a `solape()`.
+
+> El umbral de 0,3 **se fijó después de ver el R² = 0**. Es una **guarda
+> contra ajustes inútiles, no un criterio de validación**: que una sesión lo
+> supere no convierte en buena ninguna conclusión. Se eligió como el listón
+> más bajo que deja fuera la tanda 4 (R² = 0) sin dejar fuera la tanda 3
+> (R² = 0,333) — no se elige un umbral para descartar los datos incómodos.
+
+**2. Y aquí está lo incómodo: la contención fuerte destruye el ajuste que
+esta herramienta necesita.** Reconstruyendo el par #10-#11 en un test, el R²
+cae a **0,164** y la guarda la silencia. Es decir: **cuanto más real es el
+fenómeno, menos capaz es `contencion()` de verlo.**
+
+Eso no se arregla subiendo o bajando el umbral: es consecuencia de medir
+restando un modelo que el propio fenómeno rompe. **Por eso la medida buena
+es `solape()`, que no usa ningún modelo.** `contencion()` se queda como
+herramienta secundaria.
+
 ## 6. Si la hipótesis se confirma, qué habría que mirar
 
 Nada de esto está hecho ni autorizado; queda apuntado para no empezar de

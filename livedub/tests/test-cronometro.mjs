@@ -1170,17 +1170,34 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
     assert.match(r['¿hay contención?'], /NO SE PUEDE DECIR/);
   });
 
-  comprobar('reproduce el par #10-#11: frase corta y lenta pegada a una pesada', () => {
+  comprobar('detecta contención cuando el ajuste de la sesión sí informa', () => {
+    // Señal de tamaño fuerte (frases de 50 a 3.470 caracteres) para que la
+    // recta explique algo, y tres frases cortas pegadas a una vecina pesada
+    // que tardan mucho más de lo que su texto justifica.
+    const frases = Array.from({ length: 20 }, (_, i) => normal(50 + i * 180));
+    for (const car of [1800, 1700, 1600]) {
+      frases.push(normal(car));
+      frases.push({ car: 60, ms: 9000, hueco: 300 });
+    }
+    const r = sesionAsr(frases).contencion();
+    assert.equal(r['frases pegadas a una vecina pesada'], 3);
+    assert.match(r['¿hay contención?'], /SÍ, HAY INDICIO/);
+  });
+
+  comprobar('LIMITACIÓN: el par #10-#11 tal cual hunde el R² y la apaga', () => {
+    // Esto NO es un capricho del test: reproduce el caso real y demuestra
+    // que contencion() se autolimita. Una contención fuerte mete ruido que
+    // la recta no explica, el R² se desploma y la guarda la silencia.
+    // Por eso hace falta solape(), que no pasa por ningún modelo.
     const frases = Array.from({ length: 10 }, (_, i) => normal(80 + i * 15));
-    // La pesada (alucinación larga) y, pegadas a ella, tres frases cortas
-    // que tardan muchísimo más de lo que su texto justifica.
     frases.push({ car: 1889, ms: 20051, hueco: 5000 });
     frases.push({ car: 35, ms: 20392, hueco: 300 });
     frases.push({ car: 40, ms: 18000, hueco: 300 });
     frases.push({ car: 50, ms: 17000, hueco: 300 });
     const r = sesionAsr(frases).contencion();
-    assert.ok(r['frases pegadas a una vecina pesada'] >= 3);
-    assert.match(r['¿hay contención?'], /SÍ, HAY INDICIO/);
+    assert.ok(r['R² del ajuste de esta sesión'] < 0.3);
+    assert.match(r['¿hay contención?'], /NO SE PUEDE DECIR/);
+    assert.match(r['qué usar en su lugar'], /solape/);
   });
 
   comprobar('con un solo caso el indicio se declara DÉBIL, no concluyente', () => {
@@ -1204,6 +1221,43 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
     const r = sesionAsr(frases).contencion();
     assert.equal(r['frases pegadas a una vecina pesada'], 3);
     assert.match(r['¿hay contención?'], /^NO —/);
+  });
+
+  comprobar('con un ajuste que no informa (R² bajo) se CALLA en vez de opinar', () => {
+    // La tanda 4: R² = 0. Restar «lo que predice el texto» equivale a restar
+    // la media, y «de más» deja de significar lo que su nombre promete.
+    // Tiempos sin ninguna relación con el tamaño del texto.
+    const frases = [
+      { car: 20, ms: 5000 }, { car: 300, ms: 4200 }, { car: 50, ms: 4800 },
+      { car: 250, ms: 4000 }, { car: 80, ms: 5200 }, { car: 200, ms: 4100 },
+      { car: 30, ms: 4900 }, { car: 280, ms: 4300 }, { car: 60, ms: 5100 },
+      { car: 1500, ms: 4500, hueco: 300 }
+    ].map((f) => ({ hueco: 5000, ...f }));
+    const r = sesionAsr(frases).contencion();
+    assert.match(r['¿hay contención?'], /NO SE PUEDE DECIR/);
+    assert.match(r['¿hay contención?'], /no informa/);
+    // Y NO publica la columna del modelo como si fuera un dato.
+    assert.equal(r['se desvían de su texto (mediana)'], undefined);
+    assert.equal(r.detalle, undefined);
+    assert.match(r['qué usar en su lugar'], /solape\(\)/);
+  });
+
+  comprobar('deja escrito que el umbral se fijó DESPUÉS de ver el R² = 0', () => {
+    const frases = Array.from({ length: 10 }, (_, i) => ({
+      car: 20 + ((i * 37) % 280),
+      ms: 4000 + ((i * 611) % 1200),
+      hueco: 5000
+    }));
+    const r = sesionAsr(frases).contencion();
+    assert.match(r['por qué este umbral'], /DESPUÉS/);
+    assert.match(r['por qué este umbral'], /NO un criterio de validación/);
+  });
+
+  comprobar('cuando el ajuste SÍ informa, publica el R² junto al veredicto', () => {
+    const frases = Array.from({ length: 12 }, (_, i) => normal(100 + i * 40));
+    const r = sesionAsr(frases).contencion();
+    assert.ok(r['R² del ajuste de esta sesión'] >= 0.3);
+    assert.ok(Array.isArray(r.detalle));
   });
 
   comprobar('advierte de que es correlación, no causa', () => {

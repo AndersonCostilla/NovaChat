@@ -1050,9 +1050,56 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    *
    * Con una sola sesión esto es un indicio, no una conclusión.
    */
+  /**
+   * R² mínimo para que contencion() se atreva a restar «lo que predice el
+   * texto». Por debajo, la resta es ruido con nombre de dato.
+   *
+   * 0,3 no sale de ninguna teoría: es el listón más bajo que deja fuera el
+   * caso que lo motivó (tanda 4, R² = 0) y deja pasar el que sí tenía algo
+   * que decir (tanda 2, R² = 0,646). La tanda 3, con 0,333, queda justo por
+   * encima — a propósito: no se elige un umbral para descartar los datos
+   * que incomodan.
+   */
+  const R2_MINIMO_PARA_RESTAR = 0.3;
+
   function contencion({ msVecindad = 2000, msPesada = 12000 } = {}) {
     const ajuste = costeWhisper();
     if (ajuste['¿se puede responder?']) return ajuste;
+
+    // EL AJUSTE PUEDE NO INFORMAR, Y ENTONCES ESTO NO MIDE NADA.
+    //
+    // Esta herramienta resta a cada frase «lo que su texto predice». Si la
+    // recta no explica nada (R² ≈ 0), esa predicción es prácticamente la
+    // MEDIA de la sesión, y la columna «de más» deja de significar «se
+    // desvió de lo que su texto justifica» para significar «es más lenta
+    // que la media». Son cosas distintas y la segunda no sirve para hablar
+    // de contención.
+    //
+    // Pasó en la tanda 4: R² = 0 y la herramienta siguió publicando
+    // «esperado por su texto» como si fuera un dato.
+    //
+    // EL UMBRAL SE FIJA DESPUÉS DE HABER VISTO EL R² = 0. Por eso no vale
+    // como criterio de pase de nada: es sólo una GUARDA para no informar
+    // con un ajuste inútil.
+    const r2 = ajuste['R² (0 a 1)'];
+    if (r2 === null || r2 < R2_MINIMO_PARA_RESTAR) {
+      return {
+        'frases analizadas': historial.filter(
+          (f) => f.tFinAsr !== null && f.tFinHabla !== null && typeof f.caracteres === 'number'
+        ).length,
+        'R² del ajuste de esta sesión': r2,
+        '¿hay contención?':
+          `NO SE PUEDE DECIR — el ajuste de esta sesión no informa (R² = ${r2}, ` +
+          `hace falta ${R2_MINIMO_PARA_RESTAR}). Restar «lo que predice el texto» ` +
+          'sería restar poco más que la media, así que esta herramienta se calla.',
+        'qué usar en su lugar':
+          'solape(), que compara tiempos medidos sin pasar por ningún modelo.',
+        'por qué este umbral':
+          'Se fijó DESPUÉS de ver un R² = 0 en la tanda 4. Es una guarda contra ' +
+          'ajustes inservibles, NO un criterio de validación: que el R² lo supere ' +
+          'no convierte en buena una conclusión.'
+      };
+    }
 
     const fijo = ajuste['coste FIJO del encoder (ms)'];
     const porCaracter = ajuste['coste por carácter del decoder (ms)'];
@@ -1112,6 +1159,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
 
     return {
       'frases analizadas': filas.length,
+      'R² del ajuste de esta sesión': r2,
       'frases pegadas a una vecina pesada': detras.length,
       'se desvían de su texto (mediana)': medDetras === null ? null : `${medDetras} ms`,
       'las demás se desvían (mediana)': medSueltas === null ? null : `${medSueltas} ms`,
