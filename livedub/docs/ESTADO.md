@@ -60,8 +60,8 @@ Una sola alucinación se llevó por delante **14 frases legítimas seguidas**.
 |---|---|---|
 | **Detector de alucinaciones** | mira cada transcripción y decide si es habla o es un bucle | **encendido y validado a mano por ti**: 3 cortes, 3 alucinaciones reales, **cero falsos positivos** |
 | **Tope de voz larga** | corta la locución si se pasa de lo razonable | apagado — se probará aislado después |
-| **`max_new_tokens: 180`** | techo a lo que Whisper puede escribir de una frase | **aplicado hoy**, tras tres tandas de comprobación |
-| **Aviso de truncamiento** | avisa si ese techo corta una frase a medias | activo, a la espera de la primera tanda |
+| **`max_new_tokens: 180`** | techo a lo que Whisper puede escribir de una frase | **aplicado**, pero **todavía sin validar** (ver abajo) |
+| **Aviso de truncamiento** | avisa si ese techo corta una frase a medias | activo; en la tanda 4 **pasó por vacío** |
 
 ### Por qué el tope se aplicó hoy y no antes
 
@@ -94,19 +94,41 @@ ablandarlo después con el resultado ya delante.
   eso. Hay un **segundo mecanismo** —llamadas vecinas que se estorban— que
   el tope no toca. Investigación abierta en `CONTENCION-WHISPER.md`.
 
+## 6 bis. La tanda 4 no validó el tope, y hay que decirlo así
+
+Se corrió la primera tanda con el tope puesto. **Resultado: no concluyente.**
+El material era habla casi continua —14 de 16 frases cerraron por agotar los
+12 s, no por silencio—, así que **no hubo ni una alucinación, ni una llamada
+de Whisper por encima de 12 s, ni una intervención del detector**. Un arreglo
+no se valida en una sesión donde el problema no aparece.
+
+`truncadas()` dio 0 de 16, pero **eso no es un aprobado**: la frase más larga
+tenía 251 caracteres y el tope está en ~720. Nadie pasó por delante del
+guardia.
+
+Y una predicción mía falló, escrita de antemano y anotada como fallida: dije
+que el R² subiría del 0,333 y **bajó a 0**. En esta sesión el tamaño del
+texto no explica nada del tiempo de Whisper. Por qué, es pregunta abierta.
+
+Detalle en `TANDA-4.md`; la revisión del modelo de coste, en
+`COSTE-WHISPER-REVISION.md`.
+
 ## 7. Qué toca ahora
 
-**La tanda 4: validar el tope ya aplicado.** Cambiar el transcriptor invalida
-todo lo medido antes, así que se repite entera. El procedimiento está al
-final de `TANDA-3.md`.
+**La tanda 5: conseguir por fin una sesión donde el problema aparezca.** Con
+silencios, música o ruido entre tramos de habla, que es lo que hace alucinar
+a Whisper. El protocolo está **preregistrado** en `TANDA-5.md` —escrito
+antes de grabar, incluido qué resultado sería otra vez «no concluyente»—
+para que después no se pueda confundir con un aprobado.
 
 Lo que hay que mirar, por orden de importancia:
 
 1. **`truncadas()`** — ¿el techo cortó alguna frase a medias? Si alguna no
-   era alucinación, **se revierte**.
+   era alucinación, **se revierte**. Parada dura.
 2. **`cortes()`** — leídos a mano, no fiarse del informe automático.
-3. **`costeWhisper()`** — el R² debería subir desde el 0,333 de ayer.
-4. **`contencion()`** — primer dato sobre la segunda causa.
+3. **`solape()`** — la medida sin modelo de la segunda causa.
+4. **`contencion()`** — sólo si el ajuste de la sesión informa; si no, la
+   propia herramienta se niega a opinar.
 
 **La expectativa está fijada por escrito de antemano:** deben desaparecer los
 eventos lentos **con texto masivo detrás**; **no** tienen por qué desaparecer
