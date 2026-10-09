@@ -1083,6 +1083,57 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
   });
 }
 
+{
+  // EL AVISO DE TRUNCAMIENTO. Un tope que corta a mitad de palabra y no deja
+  // rastro sería un recorte silencioso: justo lo prohibido.
+  console.log('\nAVISO DE TRUNCAMIENTO (anotarTruncada / truncadas)\n');
+
+  const conTexto = (texto, { id = 1, tope = 180 } = {}) => {
+    let t = 0;
+    const c = crearCronometro({ ahora: () => t });
+    c.activar(true);
+    c.abrir(id, { tInicioHabla: 0, segundosAudio: 10, motivoCierre: 'silencio' });
+    t += 4000;
+    c.marcar(id, 'tFinAsr', { texto, caracteres: texto.length });
+    const marcada = c.anotarTruncada(id, { topeTokens: tope });
+    c.cerrar(id, { motivoFinal: 'doblada' });
+    return { c, marcada };
+  };
+
+  comprobar('sin tope activo no marca nada y lo dice', () => {
+    const { c, marcada } = conTexto('x'.repeat(900), { tope: null });
+    assert.equal(marcada, false);
+    assert.match(c.truncadas()['¿hay tope activo?'], /NO/);
+  });
+
+  comprobar('texto pegado al tope y sin punto final: posible truncamiento', () => {
+    const { c, marcada } = conTexto('palabra '.repeat(90) + 'cortad');
+    assert.equal(marcada, true);
+    assert.equal(c.truncadas()['posiblemente truncadas'], 1);
+  });
+
+  comprobar('texto pegado al tope pero terminado en punto: NO se marca', () => {
+    const { marcada } = conTexto('palabra '.repeat(90) + 'final.');
+    assert.equal(marcada, false);
+  });
+
+  comprobar('texto corto sin punto final: NO se marca (no llegó al borde)', () => {
+    const { marcada } = conTexto('una frase corta sin punto');
+    assert.equal(marcada, false);
+  });
+
+  comprobar('el informe señala si la truncada NO era sospechosa', () => {
+    const { c } = conTexto('palabra '.repeat(90) + 'cortad');
+    assert.match(c.truncadas().detalle[0]['¿el detector la vio rara?'], /NO — ¿habla real\?/);
+    assert.match(c.truncadas()['qué hacer'], /LEE/);
+  });
+
+  comprobar('el informe advierte de que es una señal, no una prueba', () => {
+    const { c } = conTexto('palabra '.repeat(90) + 'cortad');
+    assert.match(c.truncadas().aviso, /SEÑAL, no una prueba/);
+  });
+}
+
 console.log(`\n==========================================================`);
 console.log(`Resultado: ${pasadas} pasadas, ${fallidas} fallidas`);
 console.log(`==========================================================`);

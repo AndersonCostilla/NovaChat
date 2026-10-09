@@ -53,6 +53,15 @@ let recorteObjetivo = OBJETIVO_POR_DEFECTO;
 // ninguna frase legítima. Se apaga con livedub.toparAlucinaciones(false).
 let toparAlucinacionesActivo = true;
 
+// TOPE DE GENERACIÓN DE WHISPER (max_new_tokens).
+//
+// null = NO HAY TOPE. Hoy, 9-oct-2026, el transcriptor sigue sin límite y
+// este número sólo sirve para que el aviso de truncamiento sepa contra qué
+// comparar. En cuanto se aplique el tope en transcriptor-worker.js hay que
+// poner aquí EL MISMO número, o el aviso medirá contra un borde que no
+// existe. Ver docs/PROPUESTA-MAX-TOKENS.md.
+const TOPE_TOKENS_ASR = null;
+
 // Registro de lo que el tope ha recortado, para poder revisarlo A MANO
 // después de una tanda. Sin esto, "cortó 6 veces" es un número en el que no
 // hay ninguna razón para confiar: hay que poder leer los textos.
@@ -587,6 +596,12 @@ async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
   // El dato bueno entra por el VAD y lo guarda el cronómetro. Hay que
   // pedirlo. Si por lo que sea no está, NO se inventa: se pasa null y los
   // criterios que dependen de la duración no se evalúan.
+  // ¿Llegó la transcripción pegada al tope y sin terminar en punto? Si el
+  // tope está activo, eso huele a frase cortada a medias. Se deja anotado
+  // ANTES de nada para que quede en la ficha aunque luego falle la
+  // traducción. Con TOPE_TOKENS_ASR en null no hace nada.
+  cronometro.anotarTruncada(id, { topeTokens: TOPE_TOKENS_ASR });
+
   const segundosAudio = cronometro.segundosAudioDe(id);
   const diagnostico = analizarTrozos(trozosOriginales, { segundosAudio });
   cronometro.anotarAlucinacion(id, diagnostico);
@@ -1222,6 +1237,26 @@ globalThis.livedub = {
    * al texto (decoder), ajustando una recta sobre las frases de la sesión.
    * Uso: livedub.costeWhisper()
    */
+  /**
+   * Frases que el tope de generación pudo cortar a medias.
+   * Uso: livedub.truncadas()
+   */
+  truncadas: () => {
+    const r = cronometro.truncadas();
+    if (r['¿hay tope activo?']) {
+      console.warn(r['¿hay tope activo?']);
+      return r;
+    }
+    const { detalle, ...resumen } = r;
+    console.table(resumen);
+    if (detalle.length) {
+      console.log('\nLÉELAS A MANO — ¿alguna era habla real?');
+      console.table(detalle);
+      console.error('[LiveDub] Hay frases posiblemente truncadas por el tope.');
+    }
+    return r;
+  },
+
   costeWhisper: () => {
     const r = cronometro.costeWhisper();
     console.table(r);

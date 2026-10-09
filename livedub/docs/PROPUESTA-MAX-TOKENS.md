@@ -1,7 +1,22 @@
 # Propuesta: `max_new_tokens` en Whisper
 
-**9 de octubre de 2026.** Estado: **PROPUESTA. No aplicada. Toca
-`transcriptor-worker.js`, que está vetado, y necesita tu palabra.**
+**9 de octubre de 2026.** Estado: **PROPUESTA. No aplicada.**
+
+> ### Dónde está esto ahora
+>
+> **Dos tandas confirmadas sin falsos positivos** (1 frase y 58 frases): las
+> únicas frases que el tope habría tocado —#22, #29, #33— son alucinaciones
+> **verificadas a mano** por Anderson.
+>
+> Él pide **una tercera muestra con otro vídeo** antes de tocar el
+> transcriptor, y aplicarlo sólo si confirma. **Eso es una autorización
+> condicionada, y aquí una autorización condicionada no es una
+> autorización**: el código del transcriptor **no se toca hasta ver el
+> resultado de la tanda 3**. Procedimiento en [`TANDA-3.md`](TANDA-3.md),
+> evidencia acumulada en [`EVIDENCIA-TOPE.md`](EVIDENCIA-TOPE.md).
+>
+> El **aviso de truncamiento** sí está ya implementado y probado
+> (`livedub.truncadas()`), inactivo hasta que haya tope.
 
 ---
 
@@ -123,6 +138,23 @@ un argumento impecable escondiera un dato mal pasado. Por eso la herramienta.
 repeticiones y tartamudeos legítimos por diseño, y de forma invisible.**
 
 ---
+
+## 4 bis. El cambio exacto, para que no haya sorpresas
+
+Son dos líneas, en dos archivos, y nada más:
+
+```js
+// transcriptor-worker.js, en las opciones de la llamada al pipeline
+max_new_tokens: 180,
+```
+
+```js
+// offscreen.js — el mismo número, o el aviso mide contra un borde falso
+const TOPE_TOKENS_ASR = 180;
+```
+
+No se toca el troceado, ni el VAD, ni `chunk_length_s`, ni nada del audio.
+Revertirlo es borrar esas dos líneas.
 
 ## 5. Lo que pido
 

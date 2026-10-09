@@ -137,6 +137,9 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       traduccionHablada: null,
       trozosAsr: null,
       sospechosaAlucinacion: false,
+      // ¿La transcripción se quedó a medias por chocar con max_new_tokens?
+      // null = no había tope activo cuando se procesó esta frase.
+      posibleTruncada: null,
       // ms de cada llamada a generate() de esta frase, en orden. Con el
       // total solo no se distingue "muchos grupos normales" de "uno atascado".
       gruposMt: null
@@ -178,6 +181,75 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
   function segundosAudioDe(id) {
     const f = vivas.get(id) || historial.find((h) => h.id === id);
     return f?.segundosAudio ?? null;
+  }
+
+  /**
+   * ¿Esta transcripción se quedó cortada por el tope de generación?
+   *
+   * EL AVISO DE TRUNCAMIENTO. Un tope de `max_new_tokens` corta por tokens,
+   * no por oraciones: puede partir una frase a mitad de palabra y NADIE SE
+   * ENTERA, porque el texto que llega parece normal. Un recorte silencioso
+   * es exactamente lo que este proyecto tiene prohibido.
+   *
+   * No se puede saber con certeza desde aquí —el worker es quien sabe
+   * cuántos tokens generó—, así que esto es una SEÑAL, no una prueba, y se
+   * nombra como tal. Dos condiciones a la vez:
+   *
+   *   1. el texto llega al borde del tope (>= 90 % de los caracteres que
+   *      caben), y
+   *   2. no termina en signo de cierre.
+   *
+   * Una transcripción que acaba en punto es un final; una que se para en
+   * seco justo en el tope, no.
+   *
+   * Mientras no haya tope activo (topeTokens null) esto no hace nada.
+   */
+  function anotarTruncada(id, { topeTokens = null, caracteresPorToken = 4 } = {}) {
+    const f = vivas.get(id);
+    if (!f) return false;
+    if (!topeTokens) {
+      f.posibleTruncada = null;
+      return false;
+    }
+    const texto = (f.texto || '').trim();
+    const topeCaracteres = topeTokens * caracteresPorToken;
+    const alBorde = texto.length >= topeCaracteres * 0.9;
+    const terminaBien = /[.!?…"'»)\]]$/.test(texto);
+    f.posibleTruncada = alBorde && !terminaBien;
+    return f.posibleTruncada;
+  }
+
+  /**
+   * Las frases que el tope pudo cortar a medias. Se cuentan como PÉRDIDA
+   * hasta que se lean a mano: una frase truncada es contenido que el usuario
+   * no ha oído.
+   */
+  function truncadas() {
+    const conTope = historial.filter((f) => f.posibleTruncada !== null);
+    if (!conTope.length) {
+      return {
+        '¿hay tope activo?': 'NO — ninguna frase de esta sesión se procesó con tope de generación.'
+      };
+    }
+    const cortadas = conTope.filter((f) => f.posibleTruncada);
+    return {
+      'frases procesadas con tope': conTope.length,
+      'posiblemente truncadas': cortadas.length,
+      '% de la sesión': `${((cortadas.length / conTope.length) * 100).toFixed(1)} %`,
+      detalle: cortadas.map((f) => ({
+        '#': f.id,
+        caracteres: f.caracteres,
+        '¿el detector la vio rara?': f.sospechosaAlucinacion ? 'sí (alucinación)' : '⚠ NO — ¿habla real?',
+        'final del texto': `…${(f.texto || '').trim().slice(-60)}`
+      })),
+      'qué hacer': cortadas.length
+        ? 'LEE el final de cada una. Si alguna NO era alucinación, el tope está ' +
+          'cortando habla real y hay que bajarlo o quitarlo.'
+        : 'Ninguna frase llegó al borde del tope en esta sesión.',
+      aviso:
+        'Esto es una SEÑAL, no una prueba: se deduce del texto (borde del tope + ' +
+        'final sin punto), no del contador de tokens del worker.'
+    };
   }
 
   function anotarGrupos(id, grupos) {
@@ -1168,6 +1240,8 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     anotarGrupos,
     costeWhisper,
     probarTope,
+    anotarTruncada,
+    truncadas,
     segundosAudioDe,
     eventosCatastroficos,
     deriva,
