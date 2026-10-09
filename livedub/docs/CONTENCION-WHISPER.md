@@ -118,6 +118,85 @@ restando un modelo que el propio fenómeno rompe. **Por eso la medida buena
 es `solape()`, que no usa ningún modelo.** `contencion()` se queda como
 herramienta secundaria.
 
+## 5 bis. `livedub.solape()` — la medida SIN modelo
+
+**Escrito el 9-oct-2026 ANTES de correrla con datos reales.** Los criterios
+de abajo se fijan ahora para que después no se puedan acomodar al resultado.
+
+### Qué compara
+
+Dos grupos de frases, y nada más:
+
+- **con solape** — su audio estaba listo **antes** de que volviera la
+  transcripción de la anterior;
+- **sin solape** — llegaron con la cola libre.
+
+Y de cada grupo, la **mediana del tiempo medido**. No se resta ningún
+modelo, no se predice nada: sólo se comparan tiempos observados. Por eso
+sigue funcionando cuando el R² es cero, que es justo cuando `contencion()`
+se apaga.
+
+### La convención de signo, verificada en el código
+
+`hueco = tFinHabla(ésta) − tFinAsr(anterior)`, donde `tFinHabla` se sella en
+`abrir()`, al **llegar** la frase, y `tFinAsr` cuando vuelve el resultado de
+Whisper.
+
+**hueco negativo ⟹ la frase ya estaba esperando mientras la anterior aún se
+transcribía ⟹ solape.** Comprobado leyendo `cronometro.js`, no supuesto. Y
+el orden de llegada es monótono por construcción (hay un comentario en
+`abrir()` explicando que se midió así precisamente para que no salieran
+negativos espurios), así que un hueco negativo aquí es solape de verdad.
+
+### Las dos columnas, y por qué importan
+
+| columna | qué mide | incluye |
+|---|---|---|
+| **reloj de pared** (`tFinAsr − tFinHabla`) | lo que el usuario sufre | **espera en cola + cómputo** |
+| **cómputo puro** (`duracionMs` del worker) | lo que tarda el modelo | sólo cómputo |
+
+**Esto es lo que de verdad decide la pregunta.** Si las frases solapadas son
+más lentas **sólo** en reloj de pared, no hay contención: hay **cola**, y
+eso es otro problema (y otra solución). Si también son más lentas en
+**cómputo puro**, entonces sí se están estorbando de verdad.
+
+`duracionMs` ya lo mandaba el worker en cada resultado y **se estaba
+tirando a la basura**; ahora se guarda. Las sesiones grabadas antes de este
+cambio no lo tienen, y en ellas la columna sale vacía.
+
+### Criterios, fijados de antemano
+
+Mínimo de muestra: **4 frases en cada grupo**. Con menos, no se responde.
+
+| veredicto | condición |
+|---|---|
+| **NO SE PUEDE DECIR** | algún grupo con menos de 4 frases |
+| **SÍ** | las solapadas tardan **≥ 1,5×** que las no solapadas |
+| **INDICIO** | entre **1,2×** y 1,5× |
+| **NO** | por debajo de **1,2×** |
+
+Y sobre el veredicto manda siempre el matiz del cómputo puro:
+
+- si hay diferencia en reloj de pared **y** en cómputo puro → compatible con
+  contención;
+- si la hay en reloj de pared pero **no** en cómputo puro → **es cola**, no
+  contención. El veredicto `SÍ` se reescribe para decirlo.
+
+### El confusor que hay que vigilar
+
+Si el grupo solapado resulta tener textos mucho más largos, la diferencia
+puede ser sólo tamaño. Por eso el informe da **la mediana de caracteres de
+cada grupo** y **avisa** si se diferencian más de un 50 %. No lo corrige
+—corregirlo exigiría volver al modelo que se está evitando— pero lo pone
+delante.
+
+### Lo que esta medida NO puede hacer
+
+Sigue siendo **correlación dentro de una sesión**. Un tramo en que la
+máquina va lenta produce a la vez solapes (porque las frases se acumulan) y
+frases lentas. **Eso no se resuelve con más estadística sobre una sesión**;
+se resuelve comparando sesiones, o provocando el solape a propósito.
+
 ## 6. Si la hipótesis se confirma, qué habría que mirar
 
 Nada de esto está hecho ni autorizado; queda apuntado para no empezar de

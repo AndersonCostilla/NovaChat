@@ -140,6 +140,16 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
       // ¿La transcripción se quedó a medias por chocar con max_new_tokens?
       // null = no había tope activo cuando se procesó esta frase.
       posibleTruncada: null,
+      // LO QUE TARDÓ EL MODELO POR DENTRO, según el reloj del propio worker.
+      //
+      // Distinto de `tFinAsr - tFinHabla`, que es RELOJ DE PARED e incluye
+      // lo que la frase estuvo esperando en la cola del transcriptor. Sin
+      // este dato no se puede distinguir «la máquina se atasca» de «había
+      // cola», que son dos problemas con dos soluciones distintas.
+      //
+      // El worker ya lo mandaba en cada resultado; hasta hoy se tiraba.
+      // null = frase procesada antes de que esto se guardara.
+      computoAsrMs: null,
       // ms de cada llamada a generate() de esta frase, en orden. Con el
       // total solo no se distingue "muchos grupos normales" de "uno atascado".
       gruposMt: null
@@ -1062,6 +1072,120 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
    */
   const R2_MINIMO_PARA_RESTAR = 0.3;
 
+  /**
+   * ¿Tardan más las frases que llegaron con la cola ocupada?
+   *
+   * LA MEDIDA SIN MODELO. `contencion()` resta «lo que predice el texto», y
+   * eso deja de valer justo cuando hace falta: una contención fuerte mete
+   * ruido que la recta no explica, el R² se hunde y la herramienta se
+   * apaga. Aquí no se predice nada — se parten las frases en dos grupos y
+   * se comparan tiempos medidos.
+   *
+   * SIGNO DEL HUECO, verificado en el código: `tFinHabla` se sella en
+   * abrir(), al llegar la frase; `tFinAsr`, cuando vuelve Whisper. Si
+   * `tFinHabla` de ésta es ANTERIOR al `tFinAsr` de la de delante, esta
+   * frase estuvo esperando mientras la otra se transcribía. Eso es solape.
+   *
+   * Criterios preinscritos en docs/CONTENCION-WHISPER.md antes de correrla.
+   */
+  function solape({ minimoPorGrupo = 4 } = {}) {
+    // Orden de LLEGADA, que es monótono por construcción.
+    const frases = historial
+      .filter((f) => f.tFinAsr !== null && f.tFinHabla !== null)
+      .sort((a, b) => a.tFinHabla - b.tFinHabla);
+
+    const conSolape = [];
+    const sinSolape = [];
+    for (let i = 1; i < frases.length; i += 1) {
+      const f = frases[i];
+      const hueco = f.tFinHabla - frases[i - 1].tFinAsr;
+      (hueco < 0 ? conSolape : sinSolape).push({ ...f, hueco });
+    }
+
+    const pared = (f) => f.tFinAsr - f.tFinHabla;
+    const resumenGrupo = (grupo) => ({
+      frases: grupo.length,
+      'Whisper reloj de pared, mediana (ms)': mediana(grupo.map(pared)),
+      'cómputo puro del worker, mediana (ms)': mediana(grupo.map((f) => f.computoAsrMs)),
+      'caracteres, mediana': mediana(grupo.map((f) => f.caracteres))
+    });
+
+    const con = resumenGrupo(conSolape);
+    const sin = resumenGrupo(sinSolape);
+
+    const razon = (a, b) => (a !== null && b !== null && b > 0 ? Number((a / b).toFixed(2)) : null);
+    const razonPared = razon(
+      con['Whisper reloj de pared, mediana (ms)'],
+      sin['Whisper reloj de pared, mediana (ms)']
+    );
+    const razonComputo = razon(
+      con['cómputo puro del worker, mediana (ms)'],
+      sin['cómputo puro del worker, mediana (ms)']
+    );
+
+    let veredicto;
+    if (conSolape.length < minimoPorGrupo || sinSolape.length < minimoPorGrupo) {
+      veredicto =
+        `NO SE PUEDE DECIR — hacen falta ${minimoPorGrupo} frases en cada grupo y hay ` +
+        `${conSolape.length} con solape y ${sinSolape.length} sin solape.`;
+    } else if (razonPared === null) {
+      veredicto = 'NO SE PUEDE DECIR — faltan tiempos para comparar.';
+    } else if (razonPared >= 1.5) {
+      veredicto = `SÍ — las frases que llegaron con la cola ocupada tardan x${razonPared}.`;
+    } else if (razonPared >= 1.2) {
+      veredicto = `INDICIO — las solapadas tardan x${razonPared}, por debajo del x1,5 exigido.`;
+    } else {
+      veredicto = `NO — llegar con la cola ocupada no las hace más lentas (x${razonPared}).`;
+    }
+
+    // EL MATIZ QUE MANDA SOBRE EL VEREDICTO. Reloj de pared incluye la
+    // espera en cola; si la diferencia no sobrevive en cómputo puro, esto
+    // no es contención, es cola.
+    let matiz;
+    if (razonComputo === null) {
+      matiz =
+        'Sin cómputo puro no se puede separar «la máquina se atasca» de «había cola». ' +
+        'Las sesiones grabadas antes del 9-oct-2026 no traen ese dato: repite la tanda.';
+    } else if (razonPared !== null && razonPared >= 1.2 && razonComputo < 1.2) {
+      matiz =
+        `OJO — la diferencia NO sobrevive en cómputo puro (x${razonComputo}). ` +
+        'Esto es ESPERA EN COLA, no contención: el modelo tarda lo mismo, la frase ' +
+        'pasa el rato esperando turno. Es otro problema y tiene otra solución.';
+    } else if (razonComputo >= 1.2) {
+      matiz =
+        `El cómputo puro también sube (x${razonComputo}): el modelo tarda más de verdad, ` +
+        'no es sólo cola. Compatible con contención.';
+    } else {
+      matiz = `El cómputo puro no sube (x${razonComputo}). Nada que atribuir a contención.`;
+    }
+
+    const avisos = [];
+    const carCon = con['caracteres, mediana'];
+    const carSin = sin['caracteres, mediana'];
+    if (carCon !== null && carSin !== null && carSin > 0) {
+      const r = carCon / carSin;
+      if (r > 1.5 || r < 0.67) {
+        avisos.push(
+          `CONFUSOR: los dos grupos no tienen textos comparables (${carCon} vs ${carSin} ` +
+            'caracteres de mediana). Parte de la diferencia de tiempo puede ser sólo tamaño.'
+        );
+      }
+    }
+
+    return {
+      'con solape (llegaron con la cola ocupada)': con,
+      'sin solape': sin,
+      'cuánto más tardan las solapadas (reloj de pared)': razonPared === null ? null : `x${razonPared}`,
+      '· y en cómputo puro': razonComputo === null ? null : `x${razonComputo}`,
+      '¿tardan más las solapadas?': veredicto,
+      'reloj de pared vs cómputo': matiz,
+      avisos: avisos.length ? avisos : ['ninguno'],
+      aviso:
+        'Correlación dentro de una sesión, no causa: un tramo lento produce a la vez ' +
+        'solapes (las frases se acumulan) y frases lentas, sin que una cause la otra.'
+    };
+  }
+
   function contencion({ msVecindad = 2000, msPesada = 12000 } = {}) {
     const ajuste = costeWhisper();
     if (ajuste['¿se puede responder?']) return ajuste;
@@ -1389,6 +1513,7 @@ export function crearCronometro({ ahora = () => Date.now() } = {}) {
     costeWhisper,
     probarTope,
     contencion,
+    solape,
     anotarTruncada,
     truncadas,
     segundosAudioDe,

@@ -574,7 +574,15 @@ function publicarEstadoModelo(info, modulo = MODULO.TRANSCRIPCION) {
 // reinventar el canal de persistencia con actualizaciones parciales.
 async function traducirYPublicar({ id, texto, idiomaDetectado, duracionMs }) {
   // Whisper ha terminado con esta frase.
-  cronometro.marcar(id, 'tFinAsr', { texto, caracteres: texto?.length ?? 0 });
+  // `duracionMs` es el reloj del PROPIO WORKER alrededor de la llamada al
+  // modelo: cómputo puro, sin la espera en cola. Hasta hoy llegaba hasta
+  // aquí y se tiraba; es el único dato que distingue «la máquina se atasca»
+  // de «había cola». Lo usa solape().
+  cronometro.marcar(id, 'tFinAsr', {
+    texto,
+    caracteres: texto?.length ?? 0,
+    computoAsrMs: typeof duracionMs === 'number' ? duracionMs : null
+  });
 
   // ¿Esto es habla o es una alucinación de Whisper? Se mira ANTES de
   // traducir: así, cuando el tope esté activo, nos ahorramos también los
@@ -1264,6 +1272,24 @@ globalThis.livedub = {
    * La pregunta que el tope de tokens NO responde.
    * Uso: livedub.contencion()
    */
+  /**
+   * ¿Tardan más las frases que llegaron con la cola ocupada? Medida SIN
+   * modelo: funciona aunque el R² de la sesión sea cero.
+   * Uso: livedub.solape()
+   */
+  solape: (opciones) => {
+    const r = cronometro.solape(opciones);
+    const { avisos, ...resto } = r;
+    console.table({
+      'con solape': r['con solape (llegaron con la cola ocupada)'],
+      'sin solape': r['sin solape']
+    });
+    console.log(resto['¿tardan más las solapadas?']);
+    console.log(resto['reloj de pared vs cómputo']);
+    if (avisos[0] !== 'ninguno') avisos.forEach((a) => console.warn(`[LiveDub] ${a}`));
+    return r;
+  },
+
   contencion: (opciones) => {
     const r = cronometro.contencion(opciones);
     if (r['¿se puede responder?']) {

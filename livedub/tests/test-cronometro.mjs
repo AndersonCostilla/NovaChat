@@ -1266,6 +1266,101 @@ bloque('PUNTO 1: la pérdida de contenido se cuenta y se puede consultar');
   });
 }
 
+{
+  console.log('\nSOLAPE ENTRE LLAMADAS — medida sin modelo (solape)\n');
+
+  // Construye una sesión controlando el hueco con la frase anterior.
+  // hueco negativo = la frase llegó mientras la anterior aún se transcribía.
+  const sesionSolape = (frases) => {
+    let t = 0;
+    const c = crearCronometro({ ahora: () => t });
+    c.activar(true);
+    let finAsrAnterior = null;
+    frases.forEach((f, i) => {
+      const llegada = finAsrAnterior === null ? 1000 : finAsrAnterior + f.hueco;
+      t = llegada;
+      c.abrir(i + 1, { tInicioHabla: llegada - 12000, segundosAudio: 12, motivoCierre: 'tope' });
+      t = llegada + f.pared;
+      c.marcar(i + 1, 'tFinAsr', {
+        texto: 'x'.repeat(f.car ?? 200),
+        caracteres: f.car ?? 200,
+        computoAsrMs: f.computo ?? null
+      });
+      finAsrAnterior = t;
+      c.cerrar(i + 1, { motivoFinal: 'doblada' });
+    });
+    return c;
+  };
+
+  const sueltas = (n, extra = {}) =>
+    Array.from({ length: n }, () => ({ hueco: 3000, pared: 4000, computo: 3800, ...extra }));
+  const solapadas = (n, extra = {}) =>
+    Array.from({ length: n }, () => ({ hueco: -2000, pared: 4000, computo: 3800, ...extra }));
+
+  comprobar('verifica el signo: hueco negativo cuenta como solape', () => {
+    const r = sesionSolape([...sueltas(5), ...solapadas(5)]).solape();
+    assert.equal(r['con solape (llegaron con la cola ocupada)'].frases, 5);
+    assert.equal(r['sin solape'].frases, 4); // la primera no tiene anterior
+  });
+
+  comprobar('con muestra insuficiente NO responde', () => {
+    const r = sesionSolape([...sueltas(6), ...solapadas(2)]).solape();
+    assert.match(r['¿tardan más las solapadas?'], /NO SE PUEDE DECIR/);
+    assert.match(r['¿tardan más las solapadas?'], /2 con solape/);
+  });
+
+  comprobar('CASO CONTRARIO: solape sin lentitud -> NO', () => {
+    const r = sesionSolape([...sueltas(6), ...solapadas(6)]).solape();
+    assert.match(r['¿tardan más las solapadas?'], /^NO —/);
+  });
+
+  comprobar('solapadas más lentas en pared Y en cómputo -> SÍ, compatible con contención', () => {
+    const r = sesionSolape([
+      ...sueltas(6),
+      ...solapadas(6, { pared: 9000, computo: 8500 })
+    ]).solape();
+    assert.match(r['¿tardan más las solapadas?'], /^SÍ/);
+    assert.match(r['reloj de pared vs cómputo'], /Compatible con contención/);
+  });
+
+  comprobar('lentas SOLO en reloj de pared -> es COLA, no contención', () => {
+    // El modelo tarda lo mismo (3.800 ms); lo que crece es la espera.
+    const r = sesionSolape([
+      ...sueltas(6),
+      ...solapadas(6, { pared: 9000, computo: 3800 })
+    ]).solape();
+    assert.match(r['¿tardan más las solapadas?'], /^SÍ/);
+    assert.match(r['reloj de pared vs cómputo'], /ESPERA EN COLA, no contención/);
+  });
+
+  comprobar('sin cómputo puro lo dice en vez de concluir', () => {
+    const r = sesionSolape([
+      ...sueltas(6, { computo: null }),
+      ...solapadas(6, { pared: 9000, computo: null })
+    ]).solape();
+    assert.match(r['reloj de pared vs cómputo'], /Sin cómputo puro/);
+  });
+
+  comprobar('avisa del confusor si los dos grupos no tienen textos comparables', () => {
+    const r = sesionSolape([
+      ...sueltas(6, { car: 100 }),
+      ...solapadas(6, { car: 600, pared: 9000, computo: 8500 })
+    ]).solape();
+    assert.match(r.avisos[0], /CONFUSOR/);
+  });
+
+  comprobar('funciona con R² = 0, que es cuando contencion() se apaga', () => {
+    // Tiempos sin relación con el tamaño del texto: la recta no explica nada.
+    const frases = [100, 500, 150, 450, 200, 400].map((car, i) => ({
+      hueco: 3000, pared: 4000 + ((i * 311) % 400), computo: 3800, car
+    }));
+    frases.push(...solapadas(5, { pared: 9000, computo: 8500, car: 300 }));
+    const c = sesionSolape(frases);
+    assert.match(c.contencion()['¿hay contención?'], /NO SE PUEDE DECIR/);
+    assert.match(c.solape()['¿tardan más las solapadas?'], /^SÍ/);
+  });
+}
+
 console.log(`\n==========================================================`);
 console.log(`Resultado: ${pasadas} pasadas, ${fallidas} fallidas`);
 console.log(`==========================================================`);
