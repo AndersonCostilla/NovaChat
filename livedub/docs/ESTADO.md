@@ -126,7 +126,8 @@ Lo que hay que mirar, por orden de importancia:
 1. **`truncadas()`** — ¿el techo cortó alguna frase a medias? Si alguna no
    era alucinación, **se revierte**. Parada dura.
 2. **`cortes()`** — leídos a mano, no fiarse del informe automático.
-3. **`solape()`** — la medida sin modelo de la segunda causa.
+3. **`solape()`** — la medida sin modelo de la segunda causa, con los
+   criterios escritos antes de correrla.
 4. **`contencion()`** — sólo si el ajuste de la sesión informa; si no, la
    propia herramienta se niega a opinar.
 
@@ -134,6 +135,12 @@ Lo que hay que mirar, por orden de importancia:
 eventos lentos **con texto masivo detrás**; **no** tienen por qué desaparecer
 todos los de 16 s o más. Si quedan algunos del segundo tipo, el arreglo
 funciona igual.
+
+**Y hay una pregunta abierta para ti** al final de `TANDA-5.md`: si merece
+la pena poder **provocar** el escenario a propósito (inyectando silencio o
+música grabados) en vez de depender de que el vídeo lo produzca. Tiene
+riesgo —sería código de pruebas en el camino del audio real— y hay una
+alternativa barata. No se toca nada hasta que decidas.
 
 ## 8. Después, por orden, y nada por iniciativa propia
 
